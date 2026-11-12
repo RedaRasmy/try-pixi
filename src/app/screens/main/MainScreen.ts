@@ -29,7 +29,7 @@ export class MainScreen extends Container {
         this.mainContainer = new Container()
         this.addChild(this.mainContainer)
 
-        this.board = new Board(8, 8)
+        this.board = new Board(11, 11)
         this.mainContainer.addChild(this.board)
 
         this.battle = new Battle(this.board)
