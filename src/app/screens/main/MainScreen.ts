@@ -3,20 +3,24 @@ import { animate } from "motion"
 import type { AnimationPlaybackControls } from "motion/react"
 import type { Ticker } from "pixi.js"
 import { Container } from "pixi.js"
+
 import { engine } from "../../getEngine"
 import { SettingsPopup } from "../../popups/SettingsPopup"
+
+import { Battle } from "./Battle"
 import { Board } from "./Board"
-import { Player } from "./Player"
+import { Hud } from "./Hud"
 
 /** The screen that holds the app */
 export class MainScreen extends Container {
     /** Assets bundles required by this screen */
     public static assetBundles = ["main"]
-    public mainContainer: Container
 
-    private board: Board
-    private player: Player
+    public mainContainer: Container
     private settingsButton: FancyButton
+    private board: Board
+    private battle: Battle
+    private hud: Hud
     private paused = false
 
     constructor() {
@@ -28,49 +32,13 @@ export class MainScreen extends Container {
         this.board = new Board(8, 8)
         this.mainContainer.addChild(this.board)
 
-        // Player starts on tile (0, 0), added to the board so they share coordinates
-        this.player = new Player(this.board, 0, 0)
-        this.board.addChild(this.player)
-
-        // Click a tile -> walk there
-        this.board.onTileTap = (col, row) => this.player.walkTo(col, row)
-
-        // Keyboard controls
-        window.addEventListener("keydown", (e) => {
-            if (this.paused) return
-            switch (e.key) {
-                case "ArrowUp":
-                case "w":
-                    this.player.move(0, -1)
-                    break
-                case "ArrowDown":
-                case "s":
-                    this.player.move(0, 1)
-                    break
-                case "ArrowLeft":
-                case "a":
-                    this.player.move(-1, 0)
-                    break
-                case "ArrowRight":
-                case "d":
-                    this.player.move(1, 0)
-                    break
-            }
-        })
+        this.battle = new Battle(this.board)
+        this.hud = new Hud(this.battle)
+        this.addChild(this.hud)
 
         const buttonAnimations = {
-            hover: {
-                props: {
-                    scale: { x: 1.1, y: 1.1 },
-                },
-                duration: 100,
-            },
-            pressed: {
-                props: {
-                    scale: { x: 0.9, y: 0.9 },
-                },
-                duration: 100,
-            },
+            hover: { props: { scale: { x: 1.1, y: 1.1 } }, duration: 100 },
+            pressed: { props: { scale: { x: 0.9, y: 0.9 } }, duration: 100 },
         }
 
         this.settingsButton = new FancyButton({
@@ -96,12 +64,14 @@ export class MainScreen extends Container {
     /** Pause gameplay - automatically fired when a popup is presented */
     public async pause() {
         this.mainContainer.interactiveChildren = false
+        this.hud.interactiveChildren = false
         this.paused = true
     }
 
     /** Resume gameplay */
     public async resume() {
         this.mainContainer.interactiveChildren = true
+        this.hud.interactiveChildren = true
         this.paused = false
     }
 
@@ -110,18 +80,19 @@ export class MainScreen extends Container {
 
     /** Resize the screen, fired whenever window size changes */
     public resize(width: number, height: number) {
-        const centerX = width * 0.5
-        const centerY = height * 0.5
+        this.mainContainer.x = width * 0.5
+        this.mainContainer.y = height * 0.45
+        this.mainContainer.scale.set(Math.min(1, width / 1100, height / 800))
 
-        this.mainContainer.x = centerX
-        this.mainContainer.y = centerY
         this.settingsButton.x = width - 30
         this.settingsButton.y = 30
+
+        this.hud.resize(width, height)
     }
 
     /** Show screen with animations */
     public async show(): Promise<void> {
-        const elementsToAnimate = [this.settingsButton]
+        const elementsToAnimate = [this.settingsButton, this.hud]
 
         let finalPromise!: AnimationPlaybackControls
         for (const element of elementsToAnimate) {
