@@ -6,7 +6,7 @@ import type { Entity } from "./Entity"
 const WIDTH = 250
 
 export class StatusBar extends Container {
-    public show(owner: Entity, resources: Resource[]) {
+    public show(entity: Entity, resources: Resource[]) {
         for (const child of this.removeChildren())
             child.destroy({ children: true })
 
@@ -36,25 +36,28 @@ export class StatusBar extends Container {
             y += 38
         }
 
-        let x = 0
-        for (const s of owner.statuses.values()) {
-            const label =
-                s.turnsLeft !== undefined
-                    ? `${s.name} · ${s.turnsLeft} turns`
-                    : s.name
+        for (const s of entity.statusList()) {
+            const parts = [s.name]
+            if (s.dealt && s.dealt !== 1) parts.push(`deals x${s.dealt}`)
+            if (s.taken && s.taken !== 1) parts.push(`takes x${s.taken}`)
+            if (s.consumeOnAttack) parts.push("next attack")
+            if (s.turnsLeft !== undefined) {
+                parts.push(`${s.turnsLeft} turn${s.turnsLeft === 1 ? "" : "s"}`)
+            }
+
             const text = new Text({
-                text: label,
+                text: parts.join("  ·  "),
                 style: { fill: 0xffffff, fontSize: 13, fontWeight: "bold" },
             })
-            text.position.set(x + 10, y + 5)
+            text.position.set(10, y + 5)
 
             const chip = new Graphics()
-                .roundRect(x, y, text.width + 20, 26, 13)
+                .roundRect(0, y, text.width + 20, 26, 13)
                 .fill({ color: s.color, alpha: 0.35 })
                 .stroke({ width: 2, color: s.color })
 
             this.addChild(chip, text)
-            x += text.width + 26
+            y += 32
         }
     }
 }

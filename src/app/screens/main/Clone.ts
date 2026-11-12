@@ -1,16 +1,27 @@
+import type { AttackAction } from "./Actions"
 import type { Board } from "./Board"
 import { Entity } from "./Entity"
-import { createStats } from "./Stats"
+import type { Status } from "./Status"
+import type { Player } from "./Player"
 
-/** The decoy created by Laplace Demon */
+/** A copy of the player: same stats, actions and (live) status multipliers */
 export class Clone extends Entity {
-    constructor(board: Board, owner: Entity) {
+    public readonly actions: AttackAction[]
+    private source: Player
+
+    constructor(board: Board, owner: Player) {
         super(board, {
             name: "Clone",
             col: owner.col,
             row: owner.row,
             color: 0x93c5fd,
-            stats: createStats({ hp: owner.stats.hp, ap: 0, mp: 3, damage: 0 }),
+            stats: { ...owner.stats, ap: owner.stats.maxAp },
         })
+        this.source = owner
+        this.actions = owner.actions
+    }
+
+    public override statusList(): Status[] {
+        return this.source.statusList()
     }
 }

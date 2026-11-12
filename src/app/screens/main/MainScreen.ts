@@ -3,10 +3,9 @@ import { animate } from "motion"
 import type { AnimationPlaybackControls } from "motion/react"
 import type { Ticker } from "pixi.js"
 import { Container } from "pixi.js"
-
 import { engine } from "../../getEngine"
 import { SettingsPopup } from "../../popups/SettingsPopup"
-
+import { LEVEL } from "./Level"
 import { Battle } from "./Battle"
 import { Board } from "./Board"
 import { Hud } from "./Hud"
@@ -29,7 +28,7 @@ export class MainScreen extends Container {
         this.mainContainer = new Container()
         this.addChild(this.mainContainer)
 
-        this.board = new Board(11, 11)
+        this.board = new Board(LEVEL)
         this.mainContainer.addChild(this.board)
 
         this.battle = new Battle(this.board)
@@ -82,7 +81,7 @@ export class MainScreen extends Container {
     public resize(width: number, height: number) {
         this.mainContainer.x = width * 0.5
         this.mainContainer.y = height * 0.45
-        this.mainContainer.scale.set(Math.min(1, width / 1100, height / 800))
+        this.mainContainer.scale.set(Math.min(1, width / 1400, height / 950))
 
         this.settingsButton.x = width - 30
         this.settingsButton.y = 30

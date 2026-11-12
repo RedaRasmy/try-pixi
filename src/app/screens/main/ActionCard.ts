@@ -16,7 +16,7 @@ export class ActionCard extends Container {
     constructor(action: Action) {
         super()
 
-        let subtitle: string
+        let subtitle: string | undefined
         if (action.kind === "attack") {
             const range =
                 action.minRange === action.maxRange

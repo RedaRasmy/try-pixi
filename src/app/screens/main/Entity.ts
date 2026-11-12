@@ -36,6 +36,10 @@ export class Entity extends Container {
         return this.statuses.has(id)
     }
 
+    public hasNotStatus(id: string) {
+        return !this.statuses.has(id)
+    }
+
     public setGhost(on: boolean) {
         this.isGhost = on
         this.alpha = on ? 0.35 : 1
@@ -84,10 +88,8 @@ export class Entity extends Container {
         return this.stats.hp <= 0
     }
 
-    /** Refill AP and MP */
     public startTurn() {
         this.stats.ap = this.stats.maxAp
-        this.stats.mp = this.stats.maxMp
     }
 
     public spendAp(amount: number) {
@@ -147,9 +149,9 @@ export class Entity extends Container {
         })
     }
 
-    /** Walk along a list of tiles, spending 1 MP per tile */
+    /** Walk along a list of tiles, spending 1 AP per tile */
     public async followPath(path: Tile[]) {
-        this.stats.mp = Math.max(0, this.stats.mp - path.length)
+        this.spendAp(path.length)
         for (const step of path) await this.stepTo(step)
     }
 
@@ -182,5 +184,43 @@ export class Entity extends Container {
             .fill(0x222222)
             .rect(-w / 2, 0, w * ratio, h)
             .fill(0x4ade80)
+    }
+
+    /** Clones override this to show their owner's statuses */
+    public statusList(): Status[] {
+        return [...this.statuses.values()]
+    }
+
+    public damageDealtMultiplier() {
+        return this.statusList().reduce((m, s) => m * (s.dealt ?? 1), 1)
+    }
+
+    public damageTakenMultiplier() {
+        return this.statusList().reduce((m, s) => m * (s.taken ?? 1), 1)
+    }
+
+    /** Remove "next attack" statuses. Returns their names. */
+    public consumeAttackStatuses() {
+        const used: string[] = []
+        for (const s of this.statusList()) {
+            if (!s.consumeOnAttack) continue
+            this.statuses.delete(s.id)
+            used.push(s.name)
+        }
+        return used
+    }
+
+    /** Called at the start of the owner's turn. Returns the names that expired. */
+    public tickStatuses() {
+        const expired: string[] = []
+        for (const s of [...this.statuses.values()]) {
+            if (s.turnsLeft === undefined) continue
+            s.turnsLeft--
+            if (s.turnsLeft <= 0) {
+                this.statuses.delete(s.id)
+                expired.push(s.name)
+            }
+        }
+        return expired
     }
 }

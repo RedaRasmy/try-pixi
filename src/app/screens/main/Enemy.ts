@@ -1,14 +1,9 @@
 import type { AttackAction } from "./Actions"
-import { computeDamage } from "./Actions"
-import type { Board, PathNode, Tile } from "./Board"
-import { buildPath, manhattan } from "./Board"
+import type { Board, Tile } from "./Board"
 import { Entity } from "./Entity"
+import type { TurnPlan } from "./Planner"
+import { executePlan, planTurn } from "./Planner"
 import { createStats } from "./Stats"
-
-export interface TurnPlan {
-    path: Tile[]
-    attack: { target: Entity; action: AttackAction } | null
-}
 
 const SMACK: AttackAction = {
     kind: "attack",
@@ -20,8 +15,18 @@ const SMACK: AttackAction = {
     baseDamage: 15,
 }
 
+/** Weaker, but from a distance */
+const SPIT: AttackAction = {
+    kind: "attack",
+    id: "spit",
+    name: "Spit",
+    apCost: 2,
+    minRange: 2,
+    maxRange: 4,
+    baseDamage: 7,
+}
+
 export class Enemy extends Entity {
-    /** false = static dummy that just passes its turn */
     private aggressive: boolean
 
     constructor(board: Board, col: number, row: number, aggressive = true) {
@@ -30,59 +35,29 @@ export class Enemy extends Entity {
             col,
             row,
             color: 0xef4444,
-            stats: createStats({ hp: 45, ap: 3, mp: 3, damage: 6 }),
+            stats: createStats({ hp: 45, ap: 6, damage: 6 }),
         })
         this.aggressive = aggressive
     }
 
-    /**
-     * Decide the turn without doing anything. Deterministic, so the preview
-     * shows exactly what will happen. `targetTile` is where the target will
-     * stand when this enemy acts.
-     */
+    /** Decide the turn without doing anything */
     public plan(
         target: Entity,
         targetTile: Tile,
         isBlocked: (tile: Tile) => boolean,
     ): TurnPlan {
-        if (!this.aggressive) return { path: [], attack: null }
-
-        const reachable = this.board.getReachable(
+        if (!this.aggressive) return { path: [], attacks: [] }
+        return planTurn(
+            this.board,
             this,
-            this.stats.maxMp,
+            [SMACK, SPIT],
+            target,
+            targetTile,
             isBlocked,
         )
-        let best: PathNode | null = null
-        let bestDistance = Infinity
-        for (const node of reachable.values()) {
-            const d = manhattan(node, targetTile)
-            if (
-                d < bestDistance ||
-                (d === bestDistance && best && node.dist < best.dist)
-            ) {
-                best = node
-                bestDistance = d
-            }
-        }
-        if (!best) return { path: [], attack: null }
-
-        const inRange =
-            bestDistance >= SMACK.minRange && bestDistance <= SMACK.maxRange
-        const canPay = this.stats.maxAp >= SMACK.apCost
-        return {
-            path: buildPath(best),
-            attack: inRange && canPay ? { target, action: SMACK } : null,
-        }
     }
 
-    public async execute(plan: TurnPlan) {
-        this.startTurn()
-        await this.followPath(plan.path)
-        if (!plan.attack || plan.attack.target.isDead) return
-
-        this.spendAp(plan.attack.action.apCost)
-        await plan.attack.target.takeDamage(
-            computeDamage(plan.attack.action, this.stats),
-        )
+    public execute(plan: TurnPlan) {
+        return executePlan(this, plan)
     }
 }

@@ -1,4 +1,5 @@
 import type { Stats } from "./Stats"
+import type { Entity } from "./Entity"
 
 interface ActionBase {
     id: string
@@ -6,6 +7,7 @@ interface ActionBase {
     apCost: number
     /** The card only appears while the player has this status */
     requiresStatus?: string
+    forbidsStatus?: string
     /** Extra rule: return a reason when unusable, or null when fine */
     unavailable?: () => string | null
 }
@@ -22,7 +24,7 @@ export interface AttackAction extends ActionBase {
 export interface InstantAction extends ActionBase {
     kind: "instant"
     /** Small text under the name on the card */
-    subtitle: string
+    subtitle?: string
     /** For toggles: is it currently on? */
     isOn?: () => boolean
     run: () => void
@@ -60,6 +62,14 @@ export const PLAYER_ACTIONS: AttackAction[] = [
     },
 ]
 
-export function computeDamage(action: AttackAction, attacker: Stats) {
-    return Math.round((action.baseDamage / 10) * attacker.damage)
+export function computeDamage(
+    action: AttackAction,
+    attacker: Entity,
+    target?: Entity,
+) {
+    const raw =
+        (action.baseDamage / 10) *
+        attacker.stats.damage *
+        attacker.damageDealtMultiplier()
+    return Math.max(1, Math.round(raw * (target?.damageTakenMultiplier() ?? 1)))
 }

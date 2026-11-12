@@ -11,7 +11,6 @@ export class StatsPanel extends Container {
     })
     private heart = new HeartMeter(32)
     private ap = new StatRow("star", 0xa83232)
-    private mp = new StatRow("move", 0x4ade80)
 
     constructor() {
         super()
@@ -25,9 +24,8 @@ export class StatsPanel extends Container {
         this.heart.position.set(48, 70)
 
         this.ap.position.set(100, 70)
-        this.mp.position.set(170, 70)
 
-        this.addChild(this.bg, this.statsName, this.heart, this.ap, this.mp)
+        this.addChild(this.bg, this.statsName, this.heart, this.ap)
     }
 
     public show(entity: Entity) {
@@ -35,6 +33,5 @@ export class StatsPanel extends Container {
         this.statsName.text = entity.displayName
         this.heart.set(s.hp, s.maxHp)
         this.ap.set(s.ap)
-        this.mp.set(s.mp)
     }
 }

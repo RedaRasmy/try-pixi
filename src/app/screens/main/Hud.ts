@@ -1,5 +1,5 @@
 import { animate } from "motion"
-import type { AnimationPlaybackControls } from "motion/react"
+// import type { AnimationPlaybackControls } from "motion/react"
 import { Container, Graphics, Text } from "pixi.js"
 
 import type { Action } from "./Actions"
@@ -24,7 +24,7 @@ export class Hud extends Container {
     private turnBg = new Graphics()
     private turnLabel: Text
     private toast: Text
-    private toastAnim?: AnimationPlaybackControls
+    private toastAnim?: { stop: () => void }
     private stats = new StatsPanel()
     private statusBar = new StatusBar()
     private gameOver = new GameOverPanel()
@@ -88,13 +88,19 @@ export class Hud extends Container {
 
     private showToast(text: string) {
         this.toastAnim?.stop()
+        if (!text) {
+            this.toast.alpha = 0
+            return
+        }
         this.toast.text = text
         this.toast.alpha = 1
-        this.toastAnim = animate(
-            this.toast,
-            { alpha: 0 },
-            { duration: 0.6, delay: 1.8 },
-        )
+        this.toastAnim = animate(0, 1, {
+            duration: 2.4,
+            ease: "linear",
+            onUpdate: (t) => {
+                this.toast.alpha = t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25
+            },
+        })
     }
 
     /** Sync everything on screen with the battle state */
@@ -123,10 +129,11 @@ export class Hud extends Container {
                 alpha: 0.85,
             })
 
-        this.stats.show(b.inspected ?? b.player)
+        const shown = b.inspected ?? b.player
+        this.stats.show(shown)
         this.statusBar.show(
-            b.player,
-            b.abilities.flatMap((a) => a.resources),
+            shown,
+            shown === b.player ? b.abilities.flatMap((a) => a.resources) : [],
         )
     }
 

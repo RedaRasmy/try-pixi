@@ -1,8 +1,9 @@
 import type { Action } from "./Actions"
 import type { Tile } from "./Board"
 import type { Entity } from "./Entity"
+import type { TurnPlan } from "./Planner"
 
-/** A bar shown in the HUD (charge, rage...) */
+/** A bar shown in the HUD (charge, mana, rage...) */
 export interface Resource {
     id: string
     name: string
@@ -11,30 +12,69 @@ export interface Resource {
     max: number
 }
 
-/** Everything Battle needs to know about a special ability */
 export interface Ability {
     readonly actions: Action[]
     readonly resources: Resource[]
     /** Extra entities the ability puts on the board (clones, summons...) */
     readonly entities: Entity[]
 
-    /** If not null, enemies attack this instead of the player */
-    perceivedTarget(): Entity | null
-    /** Moves this ability's entities will make at the end of the turn (for the preview) */
-    plannedMoves(): Map<Entity, Tile[]>
+    /** What this enemy believes it is fighting, or null for the real player */
+    perceivedTarget(viewer: Entity): Entity | null
+    /** What the ability's own entities will do this turn (used by the preview) */
+    plannedTurns(): { entity: Entity; plan: TurnPlan }[]
     showsForecast(): boolean
+    /** Tiles the player can see. null = everything (no fog) */
+    visibleTiles(): Tile[] | null
+    /** A reason the player can't walk right now, or null */
+    blocksMovement(): string | null
     /** false = the player would break the ability by going there */
     isTileSafe(tile: Tile): boolean
     /** A reason the action can't be used right now, or null */
     blocksAction(action: Action): string | null
 
     onDamageDealt(target: Entity, amount: number): void
+    /** The player pressed End Turn */
+    onTurnEnd(): void
     /** A new player turn begins */
     onTurnStart(): void
     /** The ability's entities act (runs before the enemies) */
     playTurn(): Promise<void>
     /** Validate the ability after anything moved or got hurt */
     check(): void
-    /** Back to the initial state (replay) */
     reset(): void
+}
+
+/** Do-nothing defaults. Override only what your ability needs. */
+export abstract class BaseAbility implements Ability {
+    public actions: Action[] = []
+    public resources: Resource[] = []
+    public entities: Entity[] = []
+
+    public perceivedTarget(_viewer: Entity): Entity | null {
+        return null
+    }
+    public plannedTurns(): { entity: Entity; plan: TurnPlan }[] {
+        return []
+    }
+    public showsForecast() {
+        return false
+    }
+    public visibleTiles(): Tile[] | null {
+        return null
+    }
+    public blocksMovement(): string | null {
+        return null
+    }
+    public isTileSafe(_tile: Tile) {
+        return true
+    }
+    public blocksAction(_action: Action): string | null {
+        return null
+    }
+    public onDamageDealt(_target: Entity, _amount: number) {}
+    public onTurnEnd() {}
+    public onTurnStart() {}
+    public async playTurn() {}
+    public check() {}
+    public reset() {}
 }
