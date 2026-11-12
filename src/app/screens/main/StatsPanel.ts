@@ -1,7 +1,6 @@
 import { Container, Graphics, Text } from "pixi.js"
 
 import type { Entity } from "./Entity"
-import { createIcon } from "./Icons"
 import { HeartMeter, StatRow } from "./Meters"
 
 export class StatsPanel extends Container {
@@ -11,12 +10,8 @@ export class StatsPanel extends Container {
         style: { fill: 0xe2e8f0, fontSize: 16, fontWeight: "bold" },
     })
     private heart = new HeartMeter(32)
-    private ap = new StatRow("bolt", 0xfacc15)
+    private ap = new StatRow("star", 0xa83232)
     private mp = new StatRow("move", 0x4ade80)
-    private damageText = new Text({
-        text: "",
-        style: { fill: 0xfb923c, fontSize: 18, fontWeight: "bold" },
-    })
 
     constructor() {
         super()
@@ -27,25 +22,12 @@ export class StatsPanel extends Container {
             .stroke({ width: 2, color: 0xffffff, alpha: 0.15 })
 
         this.statsName.position.set(14, 10)
-        this.heart.position.set(48, 80)
+        this.heart.position.set(48, 70)
 
-        this.ap.position.set(100, 60)
-        this.mp.position.set(170, 60)
+        this.ap.position.set(100, 70)
+        this.mp.position.set(170, 70)
 
-        const swordIcon = createIcon("sword", 0xfb923c, 0.8)
-        swordIcon.position.set(113, 100)
-        this.damageText.anchor.set(0, 0.5)
-        this.damageText.position.set(136, 100)
-
-        this.addChild(
-            this.bg,
-            this.statsName,
-            this.heart,
-            this.ap,
-            this.mp,
-            swordIcon,
-            this.damageText,
-        )
+        this.addChild(this.bg, this.statsName, this.heart, this.ap, this.mp)
     }
 
     public show(entity: Entity) {
@@ -54,6 +36,5 @@ export class StatsPanel extends Container {
         this.heart.set(s.hp, s.maxHp)
         this.ap.set(s.ap)
         this.mp.set(s.mp)
-        this.damageText.text = `+${s.damage} damage`
     }
 }

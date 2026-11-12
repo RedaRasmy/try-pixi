@@ -1,7 +1,5 @@
 import { Container, Graphics, Text } from "pixi.js"
 
-import { createIcon } from "./Icons"
-
 export class EndTurnButton extends Container {
     public static readonly WIDTH = 160
     public static readonly HEIGHT = 56
@@ -13,7 +11,7 @@ export class EndTurnButton extends Container {
 
     constructor() {
         super()
-        const { WIDTH: w, HEIGHT: h } = EndTurnButton
+        const { HEIGHT: h } = EndTurnButton
 
         const label = new Text({
             text: "END TURN",
@@ -25,12 +23,9 @@ export class EndTurnButton extends Container {
             },
         })
         label.anchor.set(0, 0.5)
-        label.position.set(22, h / 2)
+        label.position.set(32, h / 2)
 
-        const arrow = createIcon("arrow", 0xffffff, 0.8)
-        arrow.position.set(w - 28, h / 2)
-
-        this.addChild(this.bg, label, arrow)
+        this.addChild(this.bg, label)
         this.eventMode = "static"
         this.cursor = "pointer"
         this.on("pointertap", () => {

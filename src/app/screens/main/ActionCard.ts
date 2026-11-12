@@ -21,19 +21,12 @@ export class ActionCard extends Container {
                 ? `${action.maxRange}`
                 : `${action.minRange}-${action.maxRange}`
 
-        // Icon in a dark circle
-        const iconBg = new Graphics()
-            .circle(W / 2, 46, 25)
-            .fill({ color: 0x000000, alpha: 0.35 })
-        const icon = createIcon(action.icon, 0xffffff, 1.1)
-        icon.position.set(W / 2, 46)
-
         // AP cost pill (top-left)
         const costBg = new Graphics()
             .roundRect(6, 6, 44, 22, 11)
             .fill(0x0f172a)
-            .stroke({ width: 2, color: 0xfacc15 })
-        const costIcon = createIcon("bolt", 0xfacc15, 0.5)
+            .stroke({ width: 2, color: 0xa83232 })
+        const costIcon = createIcon("star", 0xa83232, 0.5)
         costIcon.position.set(19, 17)
         const cost = new Text({
             text: `${action.apCost}`,
@@ -47,7 +40,7 @@ export class ActionCard extends Container {
             style: { fill: 0xffffff, fontSize: 15, fontWeight: "bold" },
         })
         name.anchor.set(0.5)
-        name.position.set(W / 2, 82)
+        name.position.set(W / 2, 60)
 
         const rangeText = new Text({
             text: `range ${range}`,
@@ -56,16 +49,7 @@ export class ActionCard extends Container {
         rangeText.anchor.set(0.5)
         rangeText.position.set(W / 2, 98)
 
-        this.addChild(
-            this.bg,
-            iconBg,
-            icon,
-            costBg,
-            costIcon,
-            cost,
-            name,
-            rangeText,
-        )
+        this.addChild(this.bg, costBg, costIcon, cost, name, rangeText)
 
         this.eventMode = "static"
         this.cursor = "pointer"
