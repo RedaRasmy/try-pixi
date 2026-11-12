@@ -16,10 +16,16 @@ export class ActionCard extends Container {
     constructor(action: Action) {
         super()
 
-        const range =
-            action.minRange === action.maxRange
-                ? `${action.maxRange}`
-                : `${action.minRange}-${action.maxRange}`
+        let subtitle: string
+        if (action.kind === "attack") {
+            const range =
+                action.minRange === action.maxRange
+                    ? `${action.maxRange}`
+                    : `${action.minRange}-${action.maxRange}`
+            subtitle = `range ${range}`
+        } else {
+            subtitle = action.subtitle
+        }
 
         // AP cost pill (top-left)
         const costBg = new Graphics()
@@ -43,19 +49,18 @@ export class ActionCard extends Container {
         name.position.set(W / 2, 60)
 
         const rangeText = new Text({
-            text: `range ${range}`,
+            text: subtitle,
             style: { fill: 0x94a3b8, fontSize: 11 },
         })
         rangeText.anchor.set(0.5)
         rangeText.position.set(W / 2, 98)
 
-        this.addChild(this.bg, costBg, costIcon, cost, name, rangeText)
+        this.addChild(this.bg, name, rangeText)
+        if (action.apCost > 0) this.addChild(costBg, costIcon, cost)
 
         this.eventMode = "static"
         this.cursor = "pointer"
-        this.on("pointertap", () => {
-            if (this.enabled) this.onPress?.()
-        })
+        this.on("pointertap", () => this.onPress?.())
         this.draw()
     }
 

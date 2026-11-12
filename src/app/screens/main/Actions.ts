@@ -1,16 +1,38 @@
 import type { Stats } from "./Stats"
 
-export interface Action {
+interface ActionBase {
     id: string
     name: string
     apCost: number
+    /** The card only appears while the player has this status */
+    requiresStatus?: string
+    /** Extra rule: return a reason when unusable, or null when fine */
+    unavailable?: () => string | null
+}
+
+/** Pick a target on the board within range */
+export interface AttackAction extends ActionBase {
+    kind: "attack"
     minRange: number
     maxRange: number
     baseDamage: number
 }
 
-export const PLAYER_ACTIONS: Action[] = [
+/** Runs immediately when clicked */
+export interface InstantAction extends ActionBase {
+    kind: "instant"
+    /** Small text under the name on the card */
+    subtitle: string
+    /** For toggles: is it currently on? */
+    isOn?: () => boolean
+    run: () => void
+}
+
+export type Action = AttackAction | InstantAction
+
+export const PLAYER_ACTIONS: AttackAction[] = [
     {
+        kind: "attack",
         id: "punch",
         name: "Punch",
         apCost: 3,
@@ -19,6 +41,7 @@ export const PLAYER_ACTIONS: Action[] = [
         baseDamage: 15,
     },
     {
+        kind: "attack",
         id: "kick",
         name: "Long Kick",
         apCost: 4,
@@ -27,6 +50,7 @@ export const PLAYER_ACTIONS: Action[] = [
         baseDamage: 20,
     },
     {
+        kind: "attack",
         id: "rock",
         name: "Throw Rock",
         apCost: 2,
@@ -36,7 +60,6 @@ export const PLAYER_ACTIONS: Action[] = [
     },
 ]
 
-/** Final damage = action's base damage + attacker's damage stat */
-export function computeDamage(action: Action, attacker: Stats) {
+export function computeDamage(action: AttackAction, attacker: Stats) {
     return Math.round((action.baseDamage / 10) * attacker.damage)
 }

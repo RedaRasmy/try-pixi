@@ -11,7 +11,7 @@ export interface PathNode extends Tile {
     dist: number
     parent: PathNode | null
 }
-export type HighlightLayer = "main" | "hover"
+export type HighlightLayer = "zone" | "main" | "preview" | "hover"
 
 const DIAMOND = [0, -TILE_H / 2, TILE_W / 2, 0, 0, TILE_H / 2, -TILE_W / 2, 0]
 const NEIGHBOURS = [
@@ -49,7 +49,9 @@ export class Board extends Container {
 
     private tileLayer = new Container()
     private highlightLayers: Record<HighlightLayer, Container> = {
+        zone: new Container(),
         main: new Container(),
+        preview: new Container(),
         hover: new Container(),
     }
 
@@ -60,13 +62,16 @@ export class Board extends Container {
 
         this.entityLayer.sortableChildren = true
         // Only tiles receive pointer events; everything else lets them through
+        this.entityLayer.sortableChildren = true
         this.entityLayer.eventMode = "none"
-        this.highlightLayers.main.eventMode = "none"
-        this.highlightLayers.hover.eventMode = "none"
+        for (const layer of Object.values(this.highlightLayers))
+            layer.eventMode = "none"
 
         this.addChild(
             this.tileLayer,
+            this.highlightLayers.zone,
             this.highlightLayers.main,
+            this.highlightLayers.preview,
             this.highlightLayers.hover,
             this.entityLayer,
         )
@@ -139,6 +144,15 @@ export class Board extends Container {
         alpha = 0.45,
     ) {
         this.clearHighlight(layer)
+        this.addHighlight(layer, tiles, color, alpha)
+    }
+
+    public addHighlight(
+        layer: HighlightLayer,
+        tiles: Tile[],
+        color: number,
+        alpha = 0.45,
+    ) {
         for (const t of tiles) {
             const g = new Graphics().poly(DIAMOND).fill({ color, alpha })
             const pos = this.gridToScreen(t.col, t.row)

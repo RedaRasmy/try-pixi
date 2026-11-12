@@ -1,6 +1,6 @@
 import { animate } from "motion"
 import { Container, Graphics, Text } from "pixi.js"
-
+import type { Status } from "./Status"
 import type { Board, Tile } from "./Board"
 import type { Stats } from "./Stats"
 
@@ -22,6 +22,32 @@ export class Entity extends Container {
     protected board: Board
     private visual = new Container()
     private hpBar = new Graphics()
+
+    public isGhost = false
+    public readonly statuses = new Map<string, Status>()
+
+    public addStatus(status: Status) {
+        this.statuses.set(status.id, status)
+    }
+    public removeStatus(id: string) {
+        this.statuses.delete(id)
+    }
+    public hasStatus(id: string) {
+        return this.statuses.has(id)
+    }
+
+    public setGhost(on: boolean) {
+        this.isGhost = on
+        this.alpha = on ? 0.35 : 1
+    }
+
+    public heal(amount: number) {
+        const healed = Math.min(amount, this.stats.maxHp - this.stats.hp)
+        if (healed <= 0) return
+        this.stats.hp += healed
+        this.drawHp()
+        this.showFloatingText(`+${healed}`, 0x4ade80)
+    }
 
     constructor(board: Board, options: EntityOptions) {
         super()
@@ -69,13 +95,12 @@ export class Entity extends Container {
     }
 
     public async takeDamage(amount: number) {
-        this.stats.hp = Math.max(0, this.stats.hp - amount)
+        const dealt = Math.min(amount, this.stats.hp)
+        this.stats.hp -= dealt
         this.drawHp()
 
-        // Not awaited: the number floats while the shake plays
         this.showFloatingText(`-${amount}`, 0xff4d4d)
 
-        // Little shake
         await animate(0, 1, {
             duration: 0.25,
             onUpdate: (t) => {
@@ -85,6 +110,7 @@ export class Entity extends Container {
         this.visual.x = 0
 
         if (this.isDead) this.visible = false
+        return dealt
     }
 
     /** A number that rises above the entity and fades out */
