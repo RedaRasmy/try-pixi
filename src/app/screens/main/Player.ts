@@ -12,7 +12,7 @@ export class Player extends Entity {
             col,
             row,
             color: 0x3b82f6,
-            stats: createStats({ hp: 50, ap: 10, damage: 3 }),
+            stats: createStats({ hp: 50, ap: 10, damage: 10 }),
         })
     }
 }

@@ -1,6 +1,6 @@
 import { animate } from "motion"
-// import type { AnimationPlaybackControls } from "motion/react"
 import { Container, Graphics, Text } from "pixi.js"
+import { TimelineStrip } from "./TimelineStrip"
 
 import type { Action } from "./Actions"
 import { ActionCard } from "./ActionCard"
@@ -28,6 +28,7 @@ export class Hud extends Container {
     private stats = new StatsPanel()
     private statusBar = new StatusBar()
     private gameOver = new GameOverPanel()
+    private timeline = new TimelineStrip()
 
     private viewW = 0
     private viewH = 0
@@ -73,6 +74,7 @@ export class Hud extends Container {
             this.bar,
             this.endTurn,
             this.gameOver,
+            this.timeline,
         )
 
         battle.onChange = () => this.refresh()
@@ -135,6 +137,9 @@ export class Hud extends Container {
             shown,
             shown === b.player ? b.abilities.flatMap((a) => a.resources) : [],
         )
+
+        this.timeline.show(b.forecast)
+        this.layoutTimeline()
     }
 
     /** Lay out only the visible cards and center them */
@@ -175,5 +180,14 @@ export class Hud extends Container {
 
         this.layoutBar()
         this.gameOver.resize(width, height)
+    }
+
+    private layoutTimeline() {
+        if (this.viewW === 0) return
+        this.timeline.scale.set(1)
+        const w = this.timeline.width
+        const s = Math.min(1, (this.viewW - 30) / Math.max(1, w))
+        this.timeline.scale.set(s)
+        this.timeline.position.set((this.viewW - w * s) / 2, MARGIN + 84)
     }
 }

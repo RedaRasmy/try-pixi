@@ -1,4 +1,3 @@
-import type { Stats } from "./Stats"
 import type { Entity } from "./Entity"
 
 interface ActionBase {
@@ -10,6 +9,7 @@ interface ActionBase {
     forbidsStatus?: string
     /** Extra rule: return a reason when unusable, or null when fine */
     unavailable?: () => string | null
+    visible?: () => boolean
 }
 
 /** Pick a target on the board within range */
@@ -18,6 +18,7 @@ export interface AttackAction extends ActionBase {
     minRange: number
     maxRange: number
     baseDamage: number
+    push?: number
 }
 
 /** Runs immediately when clicked */

@@ -1,43 +1,38 @@
-import type { AttackAction } from "./Actions"
 import type { Board, Tile } from "./Board"
+import { ENEMY_TYPES } from "./Enemies"
+import type { EnemyDef, EnemyType } from "./Enemies"
 import { Entity } from "./Entity"
-import type { TurnPlan } from "./Planner"
+import type { PlanHooks, TurnPlan } from "./Planner"
 import { executePlan, planTurn } from "./Planner"
 import { createStats } from "./Stats"
 
-const SMACK: AttackAction = {
-    kind: "attack",
-    id: "smack",
-    name: "Smack",
-    apCost: 3,
-    minRange: 1,
-    maxRange: 1,
-    baseDamage: 15,
-}
-
-/** Weaker, but from a distance */
-const SPIT: AttackAction = {
-    kind: "attack",
-    id: "spit",
-    name: "Spit",
-    apCost: 2,
-    minRange: 2,
-    maxRange: 4,
-    baseDamage: 7,
-}
-
 export class Enemy extends Entity {
-    private aggressive: boolean
+    private def: EnemyDef
 
-    constructor(board: Board, col: number, row: number, aggressive = true) {
+    constructor(
+        board: Board,
+        col: number,
+        row: number,
+        type: EnemyType = "dummy",
+    ) {
+        const def: EnemyDef = ENEMY_TYPES[type]
         super(board, {
-            name: "Dummy",
+            name: def.name,
             col,
             row,
-            color: 0xef4444,
-            stats: createStats({ hp: 45, ap: 6, damage: 6 }),
+            color: def.color,
+            stats: createStats({ hp: def.hp, ap: def.ap, damage: def.damage }),
         })
-        this.aggressive = aggressive
+        this.def = def
+
+        if (def.senseRadius) {
+            this.baseSense = def.senseRadius
+            this.addStatus({
+                id: "en",
+                name: `En (senses within ${def.senseRadius})`,
+                color: 0xa855f7,
+            })
+        }
     }
 
     /** Decide the turn without doing anything */
@@ -46,18 +41,17 @@ export class Enemy extends Entity {
         targetTile: Tile,
         isBlocked: (tile: Tile) => boolean,
     ): TurnPlan {
-        if (!this.aggressive) return { path: [], attacks: [] }
         return planTurn(
             this.board,
             this,
-            [SMACK, SPIT],
+            this.def.attacks,
             target,
             targetTile,
             isBlocked,
         )
     }
 
-    public execute(plan: TurnPlan) {
-        return executePlan(this, plan)
+    public execute(plan: TurnPlan, hooks?: PlanHooks) {
+        return executePlan(this, plan, hooks)
     }
 }

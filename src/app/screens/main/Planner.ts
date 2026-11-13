@@ -14,7 +14,12 @@ export interface TurnPlan {
     attacks: PlannedAttack[]
 }
 
-/** Strongest affordable attack in range, repeated while AP lasts */
+export interface PlanHooks {
+    onDamage?: (target: Entity, dealt: number) => void
+    /** Runs after a hit lands (pushes, effects...) */
+    afterHit?: (target: Entity, action: AttackAction) => Promise<void>
+}
+
 function pickAttacks(
     actions: AttackAction[],
     self: Entity,
@@ -43,9 +48,9 @@ function pickAttacks(
 }
 
 /**
- * Pick the reachable tile that allows the most damage. Ties go to fewer
- * steps. If no attack is possible, walk as close as possible to the target
- * (by real walking distance, so walls are respected).
+ * Pick the reachable tile that allows the most damage. Ties go to fewer steps.
+ * If no attack is possible, get as close as possible by real walking distance.
+ * `canStop` lets the mover walk through some tiles without ending on them.
  */
 export function planTurn(
     board: Board,
@@ -54,9 +59,10 @@ export function planTurn(
     target: Entity,
     targetTile: Tile,
     isBlocked: (tile: Tile) => boolean,
+    canStop?: (tile: Tile) => boolean,
 ): TurnPlan {
     const budget = self.stats.maxAp
-    const reachable = board.getReachable(self, budget, isBlocked)
+    const reachable = board.getReachable(self, budget, isBlocked, canStop)
     const walkToTarget = board.getReachable(targetTile, 99, () => false)
 
     let best: PathNode | null = null
@@ -107,17 +113,21 @@ export function planTurn(
 export async function executePlan(
     self: Entity,
     plan: TurnPlan,
-    onDamage?: (target: Entity, dealt: number) => void,
+    hooks: PlanHooks = {},
 ) {
     self.startTurn()
     await self.followPath(plan.path)
 
     for (const { target, action } of plan.attacks) {
         if (self.isDead || target.isDead) break
+        // The target may have been pushed away by an earlier hit
+        if (!self.canHit(target, action)) break
+
         self.spendAp(action.apCost)
         const dealt = await target.takeDamage(
             computeDamage(action, self, target),
         )
-        onDamage?.(target, dealt)
+        hooks.onDamage?.(target, dealt)
+        await hooks.afterHit?.(target, action)
     }
 }

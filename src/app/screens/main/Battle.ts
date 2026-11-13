@@ -7,21 +7,24 @@ import { Enemy } from "./Enemy"
 import type { Entity } from "./Entity"
 import { LaplaceDemon } from "./LaplaceDemon"
 import { ENEMY_STARTS, PLAYER_START } from "./Level"
-import { Nen } from "./Nen"
 import type { TurnPlan } from "./Planner"
 import { Player } from "./Player"
+import { Nen, ZETSU } from "./Nen"
 
 /** player = waiting for input, busy = an animation is playing */
 export type Phase = "player" | "enemy" | "busy" | "over"
 
-interface ForecastAttack {
+export interface ForecastAttack {
     from: Tile
     to: Tile
     damage: number
     kills: boolean
+    pushTo?: Tile
+    /** The push would drag the player out of an ability's zone */
+    breaks: boolean
 }
 
-interface ForecastStep {
+export interface ForecastStep {
     name: string
     start: Tile
     path: Tile[]
@@ -42,6 +45,8 @@ export class Battle {
     public turn = 1
     public selectedAction: AttackAction | null = null
     public inspected: Entity | null = null
+    /** What the preview shows (empty when no preview is active) */
+    public forecast: ForecastStep[] = []
 
     public onChange?: () => void
     public onGameOver?: (won: boolean) => void
@@ -74,7 +79,7 @@ export class Battle {
 
         this.player = new Player(this.board, PLAYER_START.col, PLAYER_START.row)
         this.enemies = ENEMY_STARTS.map(
-            (s) => new Enemy(this.board, s.col, s.row),
+            (s) => new Enemy(this.board, s.col, s.row, s.type),
         )
         this.board.entityLayer.addChild(this.player)
         for (const e of this.enemies) this.board.entityLayer.addChild(e)
@@ -98,6 +103,7 @@ export class Battle {
             return false
         if (action.forbidsStatus && p.hasStatus(action.forbidsStatus))
             return false
+        if (action.visible && !action.visible()) return false
         return true
     }
 
@@ -158,11 +164,14 @@ export class Battle {
 
         for (const enemy of this.enemies) {
             if (enemy.isDead) continue
+            const target = this.targetFor(enemy)
+            if (!target) continue // lost track of you, passes its turn
             await wait(400)
 
-            const target = this.targetFor(enemy)
             const plan = enemy.plan(target, target, (t) => this.isOccupied(t))
-            await enemy.execute(plan)
+            await enemy.execute(plan, {
+                afterHit: (hit, action) => this.applyPush(enemy, hit, action),
+            })
 
             if (await this.checkEnd()) return
             for (const a of this.abilities) a.check()
@@ -203,13 +212,12 @@ export class Battle {
             return
         }
 
-        // You can walk through allies but not stop on someone
-        if (this.entityAt(tile)) return
-
+        // The player can walk through the clone but never stops on anyone
         const found = this.board.getReachable(
             this.player,
             this.player.stats.ap,
             this.isBlockedForPlayer,
+            (t) => !this.entityAt(t),
         )
         const node = found.get(tileKey(tile))
         if (!node || node.dist === 0) return
@@ -224,8 +232,20 @@ export class Battle {
         const target = this.enemies.find(
             (e) => !e.isDead && e.col === tile.col && e.row === tile.row,
         )
-        const distance = manhattan(this.player, tile)
         if (!target) return
+
+        const refusal = this.abilities
+            .map((a) => a.blocksTarget(target))
+            .find(Boolean)
+        if (refusal) {
+            this.say(refusal)
+            return
+        }
+        const damage = computeDamage(action, this.player, target)
+        await target.takeDamage(damage)
+        await this.applyPush(this.player, target, action)
+
+        const distance = manhattan(this.player, tile)
         if (distance < action.minRange || distance > action.maxRange) return
         if (!this.board.hasLineOfSight(this.player, tile)) {
             this.say("A wall is in the way")
@@ -237,9 +257,7 @@ export class Battle {
 
         this.player.spendAp(action.apCost)
         this.onChange?.()
-        const damage = computeDamage(action, this.player, target)
-        const dealt = await target.takeDamage(damage)
-        for (const a of this.abilities) a.onDamageDealt(target, dealt)
+        await this.applyPush(this.player, target, action)
 
         const spent = this.player.consumeAttackStatuses()
         if (spent.length > 0) this.say(`${spent.join(", ")} spent`)
@@ -258,6 +276,48 @@ export class Battle {
         this.onChange?.()
     }
 
+    // ---------- Pushes ----------
+
+    /** Slide the target away from the attacker (used by every attacker) */
+    public async applyPush(
+        attacker: Tile,
+        target: Entity,
+        action: AttackAction,
+    ) {
+        if (!action.push || target.isDead) return
+        const path = this.pushPath(attacker, target, action.push)
+        if (path.length > 0) await target.slide(path)
+    }
+
+    /** Tiles the target would slide through. Stops at walls, edges and entities. */
+    private pushPath(
+        from: Tile,
+        at: Tile,
+        distance: number,
+        moved?: Map<Entity, Tile>,
+    ): Tile[] {
+        const dc = at.col - from.col
+        const dr = at.row - from.row
+        const step =
+            Math.abs(dc) >= Math.abs(dr)
+                ? { col: Math.sign(dc), row: 0 }
+                : { col: 0, row: Math.sign(dr) }
+
+        const path: Tile[] = []
+        let current = { col: at.col, row: at.row }
+        for (let i = 0; i < distance; i++) {
+            const next = {
+                col: current.col + step.col,
+                row: current.row + step.row,
+            }
+            if (!this.board.isInside(next.col, next.row)) break
+            if (this.board.isWall(next) || this.isOccupied(next, moved)) break
+            path.push(next)
+            current = next
+        }
+        return path
+    }
+
     // ---------- Hover ----------
 
     private handleHover(tile: Tile | null) {
@@ -272,6 +332,7 @@ export class Battle {
         ) {
             entity = undefined
         }
+        if (entity && !entity.visible) entity = undefined
         this.inspected = entity ?? null
 
         this.board.clearHighlight("hover")
@@ -300,17 +361,20 @@ export class Battle {
         this.board.clearHighlight("preview")
         this.board.clearHighlight("hover")
         this.board.clearArrows()
+        this.forecast = []
     }
 
     private fogTiles(): Tile[] | null {
+        let visible: Tile[] | null = null
         for (const a of this.abilities) {
             const tiles = a.visibleTiles()
-            if (tiles) return tiles
+            if (tiles) visible = [...(visible ?? []), ...tiles]
         }
-        return null
+        return visible
     }
 
     private updateFog() {
+        for (const a of this.abilities) a.refreshView()
         this.board.setFog(this.fogTiles())
     }
 
@@ -319,6 +383,7 @@ export class Battle {
         this.board.clearHighlight("main")
         this.board.clearHighlight("preview")
         this.board.clearArrows()
+        this.forecast = []
         if (this.phase !== "player") return
 
         const action = this.selectedAction
@@ -346,10 +411,13 @@ export class Battle {
             this.board.addHighlight("main", unsafe, 0xf97316)
         }
 
-        if (this.abilities.some((a) => a.showsForecast())) this.drawForecast()
+        if (this.abilities.some((a) => a.showsForecast())) {
+            this.forecast = this.computeForecast()
+            this.drawForecast(this.forecast)
+        }
     }
 
-    private drawForecast() {
+    private drawForecast(steps: ForecastStep[]) {
         // Several chips on one tile are stacked upwards
         const stacked = new Map<string, number>()
         const chip = (tile: Tile, text: string, color: number) => {
@@ -359,7 +427,7 @@ export class Battle {
             this.board.addTag(tile, text, color, 80 + n * 28)
         }
 
-        this.computeForecast().forEach((step, i) => {
+        steps.forEach((step, i) => {
             const enemy = step.team === "enemy"
             const moveColor = enemy ? 0xec4899 : 0x22d3ee
             const hitColor = enemy ? 0xef4444 : 0xd97706
@@ -372,7 +440,6 @@ export class Battle {
                 this.board.drawPathArrow(step.start, step.path, moveColor)
                 this.board.addHighlight("preview", [end], moveColor, 0.3)
             }
-            // Order of play + who
             this.board.addTag(end, `${i + 1}  ${step.name}`, moveColor, 6)
 
             for (const a of step.attacks) {
@@ -380,7 +447,11 @@ export class Battle {
                 let text = `-${a.damage}`
                 if (a.kills) text += " KO"
                 else if (!enemy) text += " temp"
+                if (a.pushTo) text += a.breaks ? " PUSH: ENDS" : " PUSH"
                 chip(a.to, text, hitColor)
+
+                if (a.pushTo)
+                    this.board.drawPathArrow(a.to, [a.pushTo], 0xffffff)
             }
         })
     }
@@ -408,14 +479,33 @@ export class Battle {
             const attacks: ForecastAttack[] = []
             for (const { target, action } of plan.attacks) {
                 if (hpOf(target) <= 0) break
+                const at = where(target)
+                // Same checks as the real turn: a pushed target may be out of reach
+                if (!this.board.canHit(end, at, action)) break
+
                 const damage = computeDamage(action, entity, target)
                 const after = Math.max(0, hpOf(target) - damage)
                 hp.set(target, after)
+
+                let pushTo: Tile | undefined
+                if (action.push && after > 0) {
+                    const path = this.pushPath(end, at, action.push, moved)
+                    if (path.length > 0) {
+                        pushTo = path[path.length - 1]
+                        moved.set(target, pushTo)
+                    }
+                }
+                const landing = pushTo
                 attacks.push({
                     from: end,
-                    to: where(target),
+                    to: at,
                     damage,
                     kills: after <= 0,
+                    pushTo,
+                    breaks:
+                        !!landing &&
+                        target === this.player &&
+                        !this.abilities.every((a) => a.isTileSafe(landing)),
                 })
             }
             steps.push({
@@ -435,6 +525,16 @@ export class Battle {
         for (const enemy of this.enemies) {
             if (enemy.isDead || hpOf(enemy) <= 0) continue
             const target = this.targetFor(enemy)
+            if (!target) {
+                steps.push({
+                    name: enemy.displayName,
+                    start: where(enemy),
+                    path: [],
+                    attacks: [],
+                    team: "enemy",
+                })
+                continue
+            }
             const plan = enemy.plan(target, where(target), (t) =>
                 this.isOccupied(t, moved),
             )
@@ -446,22 +546,36 @@ export class Battle {
     // ---------- Helpers ----------
 
     private reachableTiles(from: Tile, ap: number, forPlayer: boolean) {
-        const blocked = forPlayer
-            ? this.isBlockedForPlayer
-            : (t: Tile) => this.isOccupied(t)
-        const found = this.board.getReachable(from, ap, blocked)
-        return Array.from(found.values()).filter(
-            (n) => n.dist > 0 && !(forPlayer && this.entityAt(n)),
-        )
+        const found = forPlayer
+            ? this.board.getReachable(
+                  from,
+                  ap,
+                  this.isBlockedForPlayer,
+                  (t) => !this.entityAt(t),
+              )
+            : this.board.getReachable(from, ap, (t) => this.isOccupied(t))
+        return Array.from(found.values()).filter((n) => n.dist > 0)
     }
 
-    /** Who this enemy is going for: a decoy if it was fooled, else the player */
-    private targetFor(enemy: Entity): Entity {
+    /** Who this enemy believes it is fighting, or null if it can't find anyone */
+    private targetFor(enemy: Entity): Entity | null {
         for (const a of this.abilities) {
             const target = a.perceivedTarget(enemy)
             if (target) return target
         }
-        return this.player
+        return this.canPerceivePlayer(enemy) ? this.player : null
+    }
+
+    /** Zetsu hides you, unless the enemy has a clear line of sight or senses you with En */
+    private canPerceivePlayer(enemy: Entity) {
+        if (!this.player.hasStatus(ZETSU)) return true
+        if (
+            enemy.senseRadius > 0 &&
+            manhattan(enemy, this.player) <= enemy.senseRadius
+        ) {
+            return true
+        }
+        return this.board.hasLineOfSight(enemy, this.player)
     }
 
     private async checkEnd() {
@@ -494,6 +608,12 @@ export class Battle {
         )
     }
 
+    public hasEnemyAt(tile: Tile) {
+        return this.enemies.some(
+            (e) => !e.isDead && e.col === tile.col && e.row === tile.row,
+        )
+    }
+
     /** Is a tile taken? `moved` simulates entities standing somewhere else. */
     public isOccupied(tile: Tile, moved?: Map<Entity, Tile>) {
         return this.everyone.some((e) => {
@@ -503,9 +623,6 @@ export class Battle {
         })
     }
 
-    /** The player is only stopped by enemies (clones can be walked through) */
-    private isBlockedForPlayer = (tile: Tile) =>
-        this.enemies.some(
-            (e) => !e.isDead && e.col === tile.col && e.row === tile.row,
-        )
+    /** Only enemies stop the player from walking through (the clone is an illusion) */
+    private isBlockedForPlayer = (tile: Tile) => this.hasEnemyAt(tile)
 }

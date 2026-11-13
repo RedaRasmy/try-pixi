@@ -44,6 +44,7 @@ export class StatusBar extends Container {
             if (s.turnsLeft !== undefined) {
                 parts.push(`${s.turnsLeft} turn${s.turnsLeft === 1 ? "" : "s"}`)
             }
+            if (s.sense) parts.push(`senses ${s.sense}`)
 
             const text = new Text({
                 text: parts.join("  ·  "),

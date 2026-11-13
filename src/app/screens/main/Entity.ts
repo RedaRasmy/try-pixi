@@ -26,6 +26,25 @@ export class Entity extends Container {
     public isGhost = false
     public readonly statuses = new Map<string, Status>()
 
+    /** Natural sense radius (enemies with En). Statuses can raise it. */
+    public baseSense = 0
+
+    public get senseRadius() {
+        return this.statusList().reduce(
+            (m, s) => Math.max(m, s.sense ?? 0),
+            this.baseSense,
+        )
+    }
+
+    public canHit(target: Tile, range: { minRange: number; maxRange: number }) {
+        return this.board.canHit(this, target, range)
+    }
+
+    /** Move along tiles without spending AP (pushes) */
+    public async slide(path: Tile[]) {
+        for (const step of path) await this.stepTo(step)
+    }
+
     public addStatus(status: Status) {
         this.statuses.set(status.id, status)
     }

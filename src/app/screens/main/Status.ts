@@ -10,4 +10,6 @@ export interface Status {
     taken?: number
     /** Removed after the owner's next attack */
     consumeOnAttack?: boolean
+
+    sense?: number
 }

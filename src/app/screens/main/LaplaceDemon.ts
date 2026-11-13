@@ -1,25 +1,27 @@
-import type { Ability, Resource } from "./Ability"
+import { BaseAbility } from "./Ability"
+import type { Resource } from "./Ability"
 import type { Action } from "./Actions"
 import type { Battle } from "./Battle"
 import { manhattan } from "./Board"
+import type { Tile } from "./Board"
 import { Clone } from "./Clone"
 import type { Entity } from "./Entity"
+import { EYES, ZETSU } from "./Nen"
 import { executePlan, planTurn } from "./Planner"
 import type { TurnPlan } from "./Planner"
-import { ZETSU } from "./Nen"
-const EYES = "closed-eyes"
-const ZONE = "laplace"
 
+const ZONE = "laplace"
 const ZONE_RADIUS = 6
 const MAX_CHARGE = 100
 const START_CHARGE = 50
 const ACTIVATION_COST = 20
+const REBUILD_COST = 10
 /** Charge gained per turn while the ability is off */
 const REGEN = 10
-/** Testing switch: allow attacks while invisible */
-const ALLOW_ATTACKS_WHILE_ACTIVE = false
+/** false = the clone is only drawn while your eyes are closed (the preview) */
+const CLONE_ALWAYS_VISIBLE = false
 
-export class LaplaceDemon implements Ability {
+export class LaplaceDemon extends BaseAbility {
     public readonly charge: Resource = {
         id: "laplace-charge",
         name: "Laplace charge",
@@ -27,161 +29,119 @@ export class LaplaceDemon implements Ability {
         value: START_CHARGE,
         max: MAX_CHARGE,
     }
-    public readonly resources = [this.charge]
-    public readonly actions: Action[]
+    public override resources = [this.charge]
 
-    private battle: Battle
-    private eyesClosed = false
     private active = false
     private clone: Clone | null = null
     private center = { col: 0, row: 0 }
-    /** Enemies that were inside the zone on activation and still believe the clone */
+    /** Enemies inside the zone on activation that still believe the clone */
     private deceived = new Set<Entity>()
-    /** Damage dealt to each enemy during the ability (given back if it ends) */
+    /** Clone damage dealt to each enemy (given back if the ability ends) */
     private ledger = new Map<Entity, number>()
 
-    constructor(battle: Battle) {
-        this.battle = battle
+    constructor(private battle: Battle) {
+        super()
 
         this.actions = [
-            // {
-            //     kind: "instant",
-            //     id: "zetsu-on",
-            //     name: "Zetsu",
-            //     subtitle: "hide presence",
-            //     apCost: 3,
-            //     forbidsStatus: ZETSU,
-            //     run: () => {
-            //         this.zetsu = true
-            //         this.battle.player.addStatus({
-            //             id: ZETSU,
-            //             name: "Zetsu",
-            //             color: 0x43eb34,
-            //         })
-            //     },
-            // },
             {
                 kind: "instant",
-                id: "close-eyes",
-                name: "Close Eyes",
-                subtitle: this.active ? "preview" : `${ACTIVATION_COST} charge`,
-                apCost: 1,
-                forbidsStatus: EYES,
-                unavailable: () => {
-                    if (!this.battle.player.hasStatus(ZETSU))
-                        return "Needs Zetsu first"
-                    if (!this.active && this.charge.value < ACTIVATION_COST) {
-                        return "Not enough charge"
-                    }
-                    return null
-                },
+                id: "new-clone",
+                name: "New Clone",
+                subtitle: `${REBUILD_COST} charge`,
+                apCost: 2,
+                visible: () => this.active && !this.clone,
+                unavailable: () =>
+                    this.charge.value < REBUILD_COST
+                        ? "Not enough charge"
+                        : null,
                 run: () => {
-                    this.eyesClosed = true
-                    this.battle.player.addStatus({
-                        id: EYES,
-                        name: "Closed Eyes",
-                        color: 0x64748b,
-                    })
-                    if (!this.active) this.activate()
+                    this.charge.value -= REBUILD_COST
+                    this.spawnClone()
+                    this.battle.say(
+                        "A new clone appears. Enemies in the zone are fooled again.",
+                    )
                 },
             },
-            {
-                kind: "instant",
-                id: "open-eyes",
-                name: "Open Eyes",
-                subtitle: "end preview",
-                apCost: 1,
-                requiresStatus: EYES,
-                run: () => this.openEyes(),
-            },
-            // {
-            //     kind: "instant",
-            //     id: "zetsu-off",
-            //     name: "Zetsu Off",
-            //     subtitle: "end ability",
-            //     apCost: 1,
-            //     requiresStatus: ZETSU,
-            //     run: () => {
-            //         this.zetsu = false
-            //         this.battle.player.removeStatus(ZETSU)
-            //         this.end("Zetsu released")
-            //     },
-            // },
-        ]
+        ] satisfies Action[]
     }
 
-    public get entities(): Entity[] {
+    public override get entities(): Entity[] {
         return this.clone ? [this.clone] : []
     }
 
     // ---------- Ability hooks ----------
 
-    public perceivedTarget(viewer: Entity) {
+    /** Fooled enemies see the clone. En does not help against it. */
+    public override perceivedTarget(viewer: Entity) {
         if (!this.active || !this.clone || this.clone.isDead) return null
         return this.deceived.has(viewer) ? this.clone : null
     }
 
-    public plannedTurns() {
+    /** You can only attack enemies that can see the real you */
+    public override blocksTarget(target: Entity) {
+        return this.active && this.deceived.has(target)
+            ? `${target.displayName} is fooled, you can't attack it while hidden`
+            : null
+    }
+
+    public override plannedTurns() {
         if (!this.active || !this.clone) return []
         return [{ entity: this.clone, plan: this.planClone() }]
     }
 
-    public showsForecast() {
-        return this.active && this.eyesClosed
+    public override showsForecast() {
+        return this.active && this.battle.player.hasStatus(EYES)
     }
 
-    public visibleTiles() {
-        if (!this.active || !this.eyesClosed) return null
-        return this.battle.board.tilesInRange(this.center, 0, ZONE_RADIUS)
+    public override visibleTiles() {
+        if (!this.showsForecast()) return null
+        return this.battle.board.tilesInRange(this.center, 0, ZONE_RADIUS, true)
     }
 
-    public blocksMovement() {
-        return this.eyesClosed ? "Your eyes are closed" : null
+    public override refreshView() {
+        if (!this.clone || this.clone.destroyed) return
+        this.clone.visible =
+            CLONE_ALWAYS_VISIBLE || this.battle.player.hasStatus(EYES)
     }
 
-    public isTileSafe(tile: { col: number; row: number }) {
+    public override isTileSafe(tile: Tile) {
         return !this.active || this.inZone(tile)
     }
 
-    public blocksAction(action: Action) {
-        if (this.eyesClosed && action.id !== "open-eyes") {
-            return "Your eyes are closed"
+    /** Eyes closed with Zetsu on starts the ability */
+    public override onEyesClosed() {
+        if (this.active || !this.battle.player.hasStatus(ZETSU)) return
+        if (this.charge.value < ACTIVATION_COST) {
+            this.battle.say("Not enough Laplace charge")
+            return
         }
-        if (
-            this.active &&
-            action.kind === "attack" &&
-            !ALLOW_ATTACKS_WHILE_ACTIVE
-        ) {
-            return "Can't attack while invisible"
-        }
-        return null
+        this.activate()
     }
 
-    public onDamageDealt(target: Entity, amount: number) {
+    public override onDamageDealt(target: Entity, amount: number) {
         if (!this.active) return
         this.ledger.set(target, (this.ledger.get(target) ?? 0) + amount)
     }
 
-    public onTurnEnd() {
-        if (this.eyesClosed) this.openEyes()
-    }
-
-    public onTurnStart() {
+    public override onTurnStart() {
         if (!this.active) {
             this.charge.value = Math.min(MAX_CHARGE, this.charge.value + REGEN)
         }
     }
 
-    public async playTurn() {
-        if (!this.active || !this.clone) return
-        await executePlan(this.clone, this.planClone(), (target, dealt) =>
-            this.onDamageDealt(target, dealt),
-        )
+    public override async playTurn() {
+        const clone = this.clone
+        if (!this.active || !clone) return
+        await executePlan(clone, this.planClone(), {
+            onDamage: (target, dealt) => this.onDamageDealt(target, dealt),
+            afterHit: (target, action) =>
+                this.battle.applyPush(clone, target, action),
+        })
     }
 
-    public check() {
+    /** Ends only when Zetsu drops or you leave the zone */
+    public override check() {
         if (!this.active || this.battle.phase === "over") return
-
         if (!this.battle.player.hasStatus(ZETSU))
             return this.end("Zetsu released")
 
@@ -190,35 +150,39 @@ export class LaplaceDemon implements Ability {
                 this.deceived.delete(enemy)
             } else if (!this.inZone(enemy)) {
                 this.deceived.delete(enemy)
-                this.battle.say(`${enemy.displayName} saw through the illusion`)
+                this.battle.say(
+                    `${enemy.displayName} left the zone and saw through the illusion`,
+                )
             }
         }
 
-        if (this.clone?.isDead) return this.end("The clone was destroyed")
-        if (!this.inZone(this.battle.player)) {
-            return this.end("You left the Laplace zone")
+        if (this.clone?.isDead) {
+            this.loseClone("The clone was destroyed. Fooled enemies lose it.")
+        } else if (this.clone && !this.inZone(this.clone)) {
+            this.loseClone("The clone was pushed out and dissolved.")
         }
+
+        if (!this.inZone(this.battle.player))
+            this.end("You left the Laplace zone")
     }
 
-    public reset() {
+    public override reset() {
         if (this.clone && !this.clone.destroyed) this.clone.destroy()
         this.clone = null
         this.active = false
-        this.eyesClosed = false
         this.deceived.clear()
         this.ledger.clear()
         this.charge.value = START_CHARGE
         this.battle.board.clearHighlight("zone")
-        this.battle.board.setFog(null)
     }
 
     // ---------- Internals ----------
 
-    private inZone(tile: { col: number; row: number }) {
+    private inZone(tile: Tile) {
         return manhattan(tile, this.center) <= ZONE_RADIUS
     }
 
-    /** The clone fights like the player: walk toward the nearest enemy, then attack */
+    /** The clone fights like the player and can walk through the player */
     private planClone(): TurnPlan {
         const b = this.battle
         const clone = this.clone
@@ -234,13 +198,26 @@ export class LaplaceDemon implements Ability {
             clone.actions,
             enemy,
             enemy,
-            (t) => b.isOccupied(t) || !this.inZone(t),
+            (t) => b.hasEnemyAt(t) || !this.inZone(t),
+            (t) => !b.isOccupied(t),
         )
     }
 
-    private openEyes() {
-        this.eyesClosed = false
-        this.battle.player.removeStatus(EYES)
+    private spawnClone() {
+        const b = this.battle
+        this.clone = new Clone(b.board, b.player)
+        b.board.entityLayer.addChild(this.clone)
+        this.deceived = new Set(
+            b.enemies.filter((e) => !e.isDead && this.inZone(e)),
+        )
+        this.refreshView()
+    }
+
+    private loseClone(reason: string) {
+        if (this.clone && !this.clone.destroyed) this.clone.destroy()
+        this.clone = null
+        this.deceived.clear()
+        this.battle.say(reason)
     }
 
     private activate() {
@@ -249,18 +226,9 @@ export class LaplaceDemon implements Ability {
         this.active = true
         this.ledger.clear()
         this.center = { col: b.player.col, row: b.player.row }
+        this.spawnClone()
 
-        this.clone = new Clone(b.board, b.player)
-        b.board.entityLayer.addChild(this.clone)
-
-        // Only enemies inside the zone right now can be fooled
-        this.deceived = new Set(
-            b.enemies.filter((e) => !e.isDead && this.inZone(e)),
-        )
-
-        b.player.setGhost(true)
         b.player.addStatus({ id: ZONE, name: "Laplace Demon", color: 0xa78bfa })
-
         b.board.highlight(
             "zone",
             b.board.tilesInRange(this.center, 0, ZONE_RADIUS),
@@ -269,7 +237,7 @@ export class LaplaceDemon implements Ability {
         )
         b.say(
             this.deceived.size > 0
-                ? "You are invisible. Enemies in the zone see only the clone."
+                ? "Enemies in the zone see only the clone."
                 : "Nobody was inside the zone, no one is fooled.",
         )
     }
@@ -278,15 +246,12 @@ export class LaplaceDemon implements Ability {
         if (!this.active) return
         const b = this.battle
         this.active = false
-        this.eyesClosed = false
 
         if (this.clone && !this.clone.destroyed) this.clone.destroy()
         this.clone = null
         this.deceived.clear()
 
-        b.player.setGhost(false)
         b.player.removeStatus(ZONE)
-        b.player.removeStatus(EYES)
         b.board.clearHighlight("zone")
 
         // Temporary damage is given back (a kill stays: dead enemies are skipped)

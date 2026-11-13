@@ -42,13 +42,26 @@ export interface Ability {
     /** Validate the ability after anything moved or got hurt */
     check(): void
     reset(): void
+    /** A reason this target can't be attacked right now, or null */
+    blocksTarget(target: Entity): string | null
+    /** The player just closed their eyes */
+    onEyesClosed(): void
+    /** Sync what is drawn (clone visibility...) with the current state */
+    refreshView(): void
 }
 
 /** Do-nothing defaults. Override only what your ability needs. */
 export abstract class BaseAbility implements Ability {
     public actions: Action[] = []
     public resources: Resource[] = []
-    public entities: Entity[] = []
+    public get entities(): Entity[] {
+        return []
+    }
+    public blocksTarget(_target: Entity): string | null {
+        return null
+    }
+    public onEyesClosed() {}
+    public refreshView() {}
 
     public perceivedTarget(_viewer: Entity): Entity | null {
         return null

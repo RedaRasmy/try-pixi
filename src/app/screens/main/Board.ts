@@ -118,6 +118,20 @@ export class Board extends Container {
         return this.rayClear(a, b) && this.rayClear(b, a)
     }
 
+    /** In range and no wall in between */
+    public canHit(
+        from: Tile,
+        to: Tile,
+        range: { minRange: number; maxRange: number },
+    ) {
+        const d = manhattan(from, to)
+        return (
+            d >= range.minRange &&
+            d <= range.maxRange &&
+            this.hasLineOfSight(from, to)
+        )
+    }
+
     private rayClear(a: Tile, b: Tile) {
         const steps =
             Math.max(Math.abs(b.col - a.col), Math.abs(b.row - a.row)) * 2
@@ -160,24 +174,33 @@ export class Board extends Container {
         return this.walls.has(tileKey(tile))
     }
 
-    /** Floor tiles whose distance from `from` is between min and max */
-    public tilesInRange(from: Tile, min: number, max: number) {
+    public tilesInRange(
+        from: Tile,
+        min: number,
+        max: number,
+        includeWalls = false,
+    ) {
         const tiles: Tile[] = []
         for (let row = 0; row < this.rows; row++) {
             for (let col = 0; col < this.cols; col++) {
                 const t = { col, row }
                 const d = manhattan(from, t)
-                if (d >= min && d <= max && !this.isWall(t)) tiles.push(t)
+                if (d >= min && d <= max && (includeWalls || !this.isWall(t)))
+                    tiles.push(t)
             }
         }
         return tiles
     }
 
-    /** BFS: every tile reachable within `maxSteps` (walls always block) */
+    /**
+     * BFS: tiles reachable within `maxSteps`. `isBlocked` tiles can't be entered.
+     * Tiles where `canStop` is false can be walked through but aren't returned.
+     */
     public getReachable(
         from: Tile,
         maxSteps: number,
         isBlocked: (tile: Tile) => boolean,
+        canStop: (tile: Tile) => boolean = () => true,
     ) {
         const start: PathNode = {
             col: from.col,
@@ -185,6 +208,7 @@ export class Board extends Container {
             dist: 0,
             parent: null,
         }
+        const seen = new Set<string>([tileKey(start)])
         const found = new Map<string, PathNode>([[tileKey(start), start]])
         const queue: PathNode[] = [start]
 
@@ -194,16 +218,18 @@ export class Board extends Container {
 
             for (const [dc, dr] of NEIGHBOURS) {
                 const next = { col: current.col + dc, row: current.row + dr }
-                if (!this.isInside(next.col, next.row)) continue
-                if (this.isWall(next)) continue
-                if (found.has(tileKey(next)) || isBlocked(next)) continue
+                if (!this.isInside(next.col, next.row) || this.isWall(next))
+                    continue
+                const key = tileKey(next)
+                if (seen.has(key) || isBlocked(next)) continue
+                seen.add(key)
 
                 const node: PathNode = {
                     ...next,
                     dist: current.dist + 1,
                     parent: current,
                 }
-                found.set(tileKey(next), node)
+                if (canStop(next)) found.set(key, node)
                 queue.push(node)
             }
         }
