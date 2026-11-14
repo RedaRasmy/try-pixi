@@ -11,6 +11,8 @@ export const EN = "en"
 export const EYES = "closed-eyes"
 
 const EN_RADIUS = 4
+/** With eyes closed you feel creatures (not Zetsu users) this close */
+export const EYES_SENSE = 4
 
 const STATUSES: Record<string, Status> = {
     [ZETSU]: { id: ZETSU, name: "Zetsu", color: 0x43eb34, taken: 1.5 },
@@ -35,6 +37,13 @@ const STATUSES: Record<string, Status> = {
     [EYES]: { id: EYES, name: "Closed Eyes", color: 0x64748b },
 }
 
+/** A fresh copy of a status. `permanent` removes its duration (used by enemies). */
+export function makeStatus(id: string, permanent = false): Status {
+    const status = { ...STATUSES[id] }
+    if (permanent) delete status.turnsLeft
+    return status
+}
+
 export class Nen extends BaseAbility {
     constructor(private battle: Battle) {
         super()
@@ -46,7 +55,10 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "zetsu-on",
                 name: "Zetsu",
-                subtitle: "hidden, takes x1.5",
+                group: "Nen",
+                subtitle: "hide, takes x1.5",
+                description:
+                    "Hide your presence. Enemies without line of sight (or En) lose track of you. You take x1.5 damage. Seals Ten, Ren, Ko and En. Required for Laplace Demon.",
                 apCost: 3,
                 forbidsStatus: ZETSU,
                 run: () => {
@@ -59,7 +71,9 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "zetsu-off",
                 name: "Zetsu Off",
+                group: "Nen",
                 subtitle: "release",
+                description: "Stop hiding. Ends Laplace Demon if it is active.",
                 apCost: 1,
                 requiresStatus: ZETSU,
                 run: () => {
@@ -71,7 +85,10 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "ten",
                 name: "Ten",
+                group: "Nen",
                 subtitle: "takes x0.7",
+                description:
+                    "Wrap yourself in aura. You take x0.7 damage for 3 turns.",
                 apCost: 1,
                 forbidsStatus: TEN,
                 unavailable: sealed,
@@ -81,7 +98,10 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "ren",
                 name: "Ren",
+                group: "Nen",
                 subtitle: "deals x1.5",
+                description:
+                    "Amplify your aura. You deal x1.5 damage for 2 turns.",
                 apCost: 2,
                 forbidsStatus: REN,
                 unavailable: sealed,
@@ -91,7 +111,10 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "ko",
                 name: "Ko",
+                group: "Nen",
                 subtitle: "next hit x3",
+                description:
+                    "Concentrate aura into one strike: your next attack deals x3, but you take x1.5 until it is spent.",
                 apCost: 2,
                 forbidsStatus: KO,
                 unavailable: sealed,
@@ -101,7 +124,9 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "en",
                 name: "En",
+                group: "Nen",
                 subtitle: `sense ${EN_RADIUS} tiles`,
+                description: `Extend your aura ${EN_RADIUS} tiles. You see everything inside it, even through walls, Zetsu users and with your eyes closed. It cannot reveal the real body of a Laplace caster.`,
                 apCost: 2,
                 forbidsStatus: EN,
                 unavailable: sealed,
@@ -111,7 +136,9 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "close-eyes",
                 name: "Close Eyes",
-                subtitle: "darkness / preview",
+                group: "Senses",
+                subtitle: "dark / preview",
+                description: `The board goes dark. You still feel creatures within ${EYES_SENSE} tiles (not Zetsu users) and everything inside your En. With Zetsu and enough charge this starts Laplace Demon and shows the full preview of the coming turn. Eyes stay closed until you open them.`,
                 apCost: 1,
                 forbidsStatus: EYES,
                 run: () => {
@@ -123,7 +150,10 @@ export class Nen extends BaseAbility {
                 kind: "instant",
                 id: "open-eyes",
                 name: "Open Eyes",
+                group: "Senses",
                 subtitle: "see again",
+                description:
+                    "Open your eyes. The preview disappears, the ability stays active.",
                 apCost: 1,
                 requiresStatus: EYES,
                 run: () => this.remove(EYES),
@@ -152,17 +182,13 @@ export class Nen extends BaseAbility {
             : []
     }
 
-    public override onTurnEnd() {
-        this.remove(EYES)
-    }
-
     // ---------- Helpers ----------
 
     private has(id: string) {
         return this.battle.player.hasStatus(id)
     }
     private give(id: string) {
-        this.battle.player.addStatus({ ...STATUSES[id] })
+        this.battle.player.addStatus(makeStatus(id))
     }
     private remove(id: string) {
         this.battle.player.removeStatus(id)

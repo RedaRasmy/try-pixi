@@ -9,6 +9,8 @@ import type { Entity } from "./Entity"
 import { EYES, ZETSU } from "./Nen"
 import { executePlan, planTurn } from "./Planner"
 import type { TurnPlan } from "./Planner"
+import { sim } from "./Script"
+import type { Script } from "./Script"
 
 const ZONE = "laplace"
 const ZONE_RADIUS = 6
@@ -47,7 +49,10 @@ export class LaplaceDemon extends BaseAbility {
                 kind: "instant",
                 id: "new-clone",
                 name: "New Clone",
+                group: "Senses",
                 subtitle: `${REBUILD_COST} charge`,
+                description:
+                    "Create a new clone. Enemies inside the zone are fooled again. Only available while Laplace is active and the clone is gone.",
                 apCost: 2,
                 visible: () => this.active && !this.clone,
                 unavailable: () =>
@@ -129,10 +134,10 @@ export class LaplaceDemon extends BaseAbility {
         }
     }
 
-    public override async playTurn() {
+    public override *playTurn(): Script {
         const clone = this.clone
         if (!this.active || !clone) return
-        await executePlan(clone, this.planClone(), {
+        yield* executePlan(clone, this.planClone(), {
             onDamage: (target, dealt) => this.onDamageDealt(target, dealt),
             afterHit: (target, action) =>
                 this.battle.applyPush(clone, target, action),
@@ -166,9 +171,27 @@ export class LaplaceDemon extends BaseAbility {
             this.end("You left the Laplace zone")
     }
 
+    public override snapshot() {
+        const state = {
+            active: this.active,
+            clone: this.clone,
+            center: { ...this.center },
+            deceived: new Set(this.deceived),
+            ledger: new Map(this.ledger),
+            charge: this.charge.value,
+        }
+        return () => {
+            this.active = state.active
+            this.clone = state.clone
+            this.center = { ...state.center }
+            this.deceived = new Set(state.deceived)
+            this.ledger = new Map(state.ledger)
+            this.charge.value = state.charge
+        }
+    }
+
     public override reset() {
-        if (this.clone && !this.clone.destroyed) this.clone.destroy()
-        this.clone = null
+        this.dropClone()
         this.active = false
         this.deceived.clear()
         this.ledger.clear()
@@ -180,6 +203,13 @@ export class LaplaceDemon extends BaseAbility {
 
     private inZone(tile: Tile) {
         return manhattan(tile, this.center) <= ZONE_RADIUS
+    }
+
+    /** Destroy the clone's display object (never during a simulation) */
+    private dropClone() {
+        if (this.clone && !this.clone.destroyed && !sim.dry)
+            this.clone.destroy()
+        this.clone = null
     }
 
     /** The clone fights like the player and can walk through the player */
@@ -214,8 +244,7 @@ export class LaplaceDemon extends BaseAbility {
     }
 
     private loseClone(reason: string) {
-        if (this.clone && !this.clone.destroyed) this.clone.destroy()
-        this.clone = null
+        this.dropClone()
         this.deceived.clear()
         this.battle.say(reason)
     }
@@ -246,13 +275,11 @@ export class LaplaceDemon extends BaseAbility {
         if (!this.active) return
         const b = this.battle
         this.active = false
-
-        if (this.clone && !this.clone.destroyed) this.clone.destroy()
-        this.clone = null
+        this.dropClone()
         this.deceived.clear()
 
         b.player.removeStatus(ZONE)
-        b.board.clearHighlight("zone")
+        if (!sim.dry) b.board.clearHighlight("zone")
 
         // Temporary damage is given back (a kill stays: dead enemies are skipped)
         for (const [enemy, amount] of this.ledger) {
@@ -260,5 +287,9 @@ export class LaplaceDemon extends BaseAbility {
         }
         this.ledger.clear()
         b.say(reason)
+    }
+
+    public override previewTiles() {
+        return this.battle.board.tilesInRange(this.center, 0, ZONE_RADIUS, true)
     }
 }

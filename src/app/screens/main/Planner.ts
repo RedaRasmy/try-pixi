@@ -3,6 +3,8 @@ import { computeDamage } from "./Actions"
 import type { Board, PathNode, Tile } from "./Board"
 import { buildPath, manhattan, tileKey } from "./Board"
 import type { Entity } from "./Entity"
+import { record } from "./Script"
+import type { Script } from "./Script"
 
 export interface PlannedAttack {
     target: Entity
@@ -17,7 +19,7 @@ export interface TurnPlan {
 export interface PlanHooks {
     onDamage?: (target: Entity, dealt: number) => void
     /** Runs after a hit lands (pushes, effects...) */
-    afterHit?: (target: Entity, action: AttackAction) => Promise<void>
+    afterHit?: (target: Entity, action: AttackAction) => Script
 }
 
 function pickAttacks(
@@ -110,13 +112,21 @@ export function planTurn(
     return { path: buildPath(best), attacks: bestAttacks }
 }
 
-export async function executePlan(
+export function* executePlan(
     self: Entity,
     plan: TurnPlan,
     hooks: PlanHooks = {},
-) {
+): Script {
     self.startTurn()
-    await self.followPath(plan.path)
+    if (plan.path.length > 0) {
+        record({
+            kind: "move",
+            actor: self,
+            from: { col: self.col, row: self.row },
+            path: plan.path,
+        })
+    }
+    yield self.followPath(plan.path)
 
     for (const { target, action } of plan.attacks) {
         if (self.isDead || target.isDead) break
@@ -124,10 +134,19 @@ export async function executePlan(
         if (!self.canHit(target, action)) break
 
         self.spendAp(action.apCost)
-        const dealt = await target.takeDamage(
-            computeDamage(action, self, target),
-        )
+        const damage = computeDamage(action, self, target)
+        const dealt = Math.min(damage, target.stats.hp)
+        record({
+            kind: "attack",
+            actor: self,
+            target,
+            from: { col: self.col, row: self.row },
+            to: { col: target.col, row: target.row },
+            damage,
+            kills: damage >= target.stats.hp,
+        })
+        yield target.takeDamage(damage)
         hooks.onDamage?.(target, dealt)
-        await hooks.afterHit?.(target, action)
+        if (hooks.afterHit) yield* hooks.afterHit(target, action)
     }
 }

@@ -9,6 +9,8 @@ export interface EnemyDef {
     /** Sees through illusions when the real player is this close (tiles) */
     senseRadius?: number
     attacks: AttackAction[]
+    /** Permanent Nen statuses (see Nen.ts), e.g. ["zetsu"] */
+    nen?: string[]
 }
 
 const hit = (
@@ -69,6 +71,18 @@ export const ENEMY_TYPES = {
         ap: 6,
         damage: 10,
         attacks: [hit("snipe", "Snipe", 5, 3, 20, 40)],
+    },
+    stalker: {
+        name: "Stalker",
+        color: 0x14b8a6,
+        hp: 35,
+        ap: 8,
+        damage: 12,
+        nen: ["zetsu"],
+        attacks: [
+            hit("stab", "Stab", 3, 1, 1, 14),
+            hit("knife", "Knife", 2, 2, 3, 8),
+        ],
     },
 } satisfies Record<string, EnemyDef>
 

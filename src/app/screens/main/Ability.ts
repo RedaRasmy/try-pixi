@@ -2,6 +2,7 @@ import type { Action } from "./Actions"
 import type { Tile } from "./Board"
 import type { Entity } from "./Entity"
 import type { TurnPlan } from "./Planner"
+import type { Script } from "./Script"
 
 /** A bar shown in the HUD (charge, mana, rage...) */
 export interface Resource {
@@ -38,7 +39,7 @@ export interface Ability {
     /** A new player turn begins */
     onTurnStart(): void
     /** The ability's entities act (runs before the enemies) */
-    playTurn(): Promise<void>
+    playTurn(): Script
     /** Validate the ability after anything moved or got hurt */
     check(): void
     reset(): void
@@ -48,6 +49,10 @@ export interface Ability {
     onEyesClosed(): void
     /** Sync what is drawn (clone visibility...) with the current state */
     refreshView(): void
+    /** Save the ability's state. Call the returned function to restore it (used by the preview). */
+    snapshot(): () => void
+    /** Tiles the player can foresee while previewing, or null if there is no limit */
+    previewTiles(): Tile[] | null
 }
 
 /** Do-nothing defaults. Override only what your ability needs. */
@@ -87,7 +92,14 @@ export abstract class BaseAbility implements Ability {
     public onDamageDealt(_target: Entity, _amount: number) {}
     public onTurnEnd() {}
     public onTurnStart() {}
-    public async playTurn() {}
+    public *playTurn(): Script {}
+    public snapshot() {
+        return () => {}
+    }
     public check() {}
     public reset() {}
+
+    public previewTiles(): Tile[] | null {
+        return null
+    }
 }

@@ -2,8 +2,10 @@ import type { Board, Tile } from "./Board"
 import { ENEMY_TYPES } from "./Enemies"
 import type { EnemyDef, EnemyType } from "./Enemies"
 import { Entity } from "./Entity"
+import { EN, makeStatus } from "./Nen"
 import type { PlanHooks, TurnPlan } from "./Planner"
 import { executePlan, planTurn } from "./Planner"
+import type { Script } from "./Script"
 import { createStats } from "./Stats"
 
 export class Enemy extends Entity {
@@ -25,12 +27,13 @@ export class Enemy extends Entity {
         })
         this.def = def
 
+        // Enemies use the same Nen statuses as the player (permanent ones)
+        for (const id of def.nen ?? []) this.addStatus(makeStatus(id, true))
         if (def.senseRadius) {
-            this.baseSense = def.senseRadius
             this.addStatus({
-                id: "en",
-                name: `En (senses within ${def.senseRadius})`,
-                color: 0xa855f7,
+                ...makeStatus(EN, true),
+                sense: def.senseRadius,
+                name: `En (${def.senseRadius})`,
             })
         }
     }
@@ -51,7 +54,7 @@ export class Enemy extends Entity {
         )
     }
 
-    public execute(plan: TurnPlan, hooks?: PlanHooks) {
+    public execute(plan: TurnPlan, hooks?: PlanHooks): Script {
         return executePlan(this, plan, hooks)
     }
 }

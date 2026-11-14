@@ -68,6 +68,7 @@ export class Board extends Container {
 
     private walls = new Set<string>()
     private tileLayer = new Container()
+    private senseLayer = new Container()
     private highlightLayers: Record<HighlightLayer, Container> = {
         zone: new Container(),
         main: new Container(),
@@ -77,6 +78,7 @@ export class Board extends Container {
     private arrows = new Graphics()
     private labelLayer = new Container()
     private fogLayer = new Container()
+    private flashLayer = new Container()
 
     /** @param layout one string per row: '.' floor, '#' wall */
     constructor(layout: string[]) {
@@ -95,6 +97,8 @@ export class Board extends Container {
         this.entityLayer.eventMode = "none"
         this.arrows.eventMode = "none"
         this.fogLayer.eventMode = "none"
+        this.senseLayer.eventMode = "none"
+        this.flashLayer.eventMode = "none"
         for (const layer of Object.values(this.highlightLayers)) {
             layer.eventMode = "none"
         }
@@ -107,10 +111,39 @@ export class Board extends Container {
             this.highlightLayers.hover,
             this.entityLayer,
             this.arrows,
+            this.flashLayer,
             this.labelLayer,
             this.fogLayer,
+            this.senseLayer,
         )
         this.build()
+    }
+
+    /** A short-lived attack arrow (used by the preview playback) */
+    public flashAttack(from: Tile, to: Tile, color: number, ms = 500) {
+        const g = new Graphics()
+        const saved = this.arrows
+        this.arrows = g
+        this.drawAttackArrow(from, to, color)
+        this.arrows = saved
+        this.flashLayer.addChild(g)
+        setTimeout(() => {
+            if (!g.destroyed) g.destroy()
+        }, ms)
+    }
+
+    /** Rings drawn above the fog for things you can feel but not see */
+    public setSensed(items: { tile: Tile; color: number }[]) {
+        for (const child of this.senseLayer.removeChildren()) child.destroy()
+        if (items.length === 0) return
+
+        const g = new Graphics()
+        for (const { tile, color } of items) {
+            const p = this.gridToScreen(tile.col, tile.row)
+            g.ellipse(p.x, p.y, 34, 17).stroke({ width: 4, color, alpha: 0.95 })
+            g.circle(p.x, p.y - 30, 7).fill({ color, alpha: 0.95 })
+        }
+        this.senseLayer.addChild(g)
     }
 
     /** Is there a clear straight line between two tiles (no wall in between)? */

@@ -3,6 +3,7 @@ import { Container, Graphics, Text } from "pixi.js"
 import type { Status } from "./Status"
 import type { Board, Tile } from "./Board"
 import type { Stats } from "./Stats"
+import { sim, record } from "./Script"
 
 export interface EntityOptions {
     name: string
@@ -22,6 +23,7 @@ export class Entity extends Container {
     protected board: Board
     private visual = new Container()
     private hpBar = new Graphics()
+    public readonly color: number
 
     public isGhost = false
     public readonly statuses = new Map<string, Status>()
@@ -38,11 +40,6 @@ export class Entity extends Container {
 
     public canHit(target: Tile, range: { minRange: number; maxRange: number }) {
         return this.board.canHit(this, target, range)
-    }
-
-    /** Move along tiles without spending AP (pushes) */
-    public async slide(path: Tile[]) {
-        for (const step of path) await this.stepTo(step)
     }
 
     public addStatus(status: Status) {
@@ -68,6 +65,10 @@ export class Entity extends Container {
         const healed = Math.min(amount, this.stats.maxHp - this.stats.hp)
         if (healed <= 0) return
         this.stats.hp += healed
+        if (sim.dry) {
+            record({ kind: "heal", target: this, amount: healed })
+            return
+        }
         this.drawHp()
         this.showFloatingText(`+${healed}`, 0x4ade80)
     }
@@ -79,6 +80,7 @@ export class Entity extends Container {
         this.stats = options.stats
         this.col = options.col
         this.row = options.row
+        this.color = options.color
 
         const shadow = new Graphics()
             .ellipse(0, 0, 22, 10)
@@ -118,10 +120,10 @@ export class Entity extends Container {
     public async takeDamage(amount: number) {
         const dealt = Math.min(amount, this.stats.hp)
         this.stats.hp -= dealt
+        if (sim.dry) return dealt
+
         this.drawHp()
-
         this.showFloatingText(`-${amount}`, 0xff4d4d)
-
         await animate(0, 1, {
             duration: 0.25,
             onUpdate: (t) => {
@@ -134,22 +136,37 @@ export class Entity extends Container {
         return dealt
     }
 
+    /** Walk along a list of tiles, spending 1 AP per tile */
+    public async followPath(path: Tile[]) {
+        this.spendAp(path.length)
+        await this.slide(path)
+    }
+
+    /** Move along tiles without spending AP (also used by pushes) */
+    public async slide(path: Tile[]) {
+        if (path.length === 0) return
+        if (sim.dry) {
+            const last = path[path.length - 1]
+            this.col = last.col
+            this.row = last.row
+            return
+        }
+        for (const step of path) await this.stepTo(step)
+    }
+
     /** A number that rises above the entity and fades out */
-    private showFloatingText(content: string, color: number) {
+    public showFloatingText(content: string, color: number, size = 34, dy = 0) {
         const text = new Text({
             text: content,
             style: {
                 fill: color,
-                fontSize: 34,
+                fontSize: size,
                 fontWeight: "bold",
                 stroke: { color: 0x000000, width: 5 },
             },
         })
         text.anchor.set(0.5)
-
-        // It lives in the board's entity layer (not inside the entity), so it
-        // stays visible even if the entity dies and gets hidden
-        const startY = this.y - 100
+        const startY = this.y - 100 - dy
         text.position.set(this.x, startY)
         text.zIndex = 10000
         this.board.entityLayer.addChild(text)
@@ -168,10 +185,19 @@ export class Entity extends Container {
         })
     }
 
-    /** Walk along a list of tiles, spending 1 AP per tile */
-    public async followPath(path: Tile[]) {
-        this.spendAp(path.length)
-        for (const step of path) await this.stepTo(step)
+    /** Save position, stats and statuses. Call the returned function to restore them. */
+    public snapshot() {
+        const { col, row } = this
+        const stats = { ...this.stats }
+        const statuses = [...this.statuses.values()].map((s) => ({ ...s }))
+        return () => {
+            this.col = col
+            this.row = row
+            Object.assign(this.stats, stats)
+            this.statuses.clear()
+            for (const s of statuses) this.statuses.set(s.id, { ...s })
+            this.drawHp()
+        }
     }
 
     private async stepTo(tile: Tile) {
@@ -193,7 +219,7 @@ export class Entity extends Container {
         this.zIndex = tile.col + tile.row
     }
 
-    private drawHp() {
+    public drawHp() {
         const w = 44
         const h = 6
         const ratio = this.stats.hp / this.stats.maxHp
@@ -203,6 +229,15 @@ export class Entity extends Container {
             .fill(0x222222)
             .rect(-w / 2, 0, w * ratio, h)
             .fill(0x4ade80)
+    }
+
+    /** Put the entity on a tile instantly */
+    public place(tile: Tile) {
+        this.col = tile.col
+        this.row = tile.row
+        const p = this.board.gridToScreen(tile.col, tile.row)
+        this.position.set(p.x, p.y)
+        this.zIndex = tile.col + tile.row
     }
 
     /** Clones override this to show their owner's statuses */

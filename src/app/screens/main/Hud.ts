@@ -1,24 +1,21 @@
 import { animate } from "motion"
 import { Container, Graphics, Text } from "pixi.js"
-import { TimelineStrip } from "./TimelineStrip"
+import type { DestroyOptions } from "pixi.js"
 
-import type { Action } from "./Actions"
-import { ActionCard } from "./ActionCard"
+import { ActionBar } from "./ActionBar"
 import type { Battle } from "./Battle"
 import { EndTurnButton } from "./EndTurnButton"
 import { GameOverPanel } from "./GameOverPanel"
 import { StatsPanel } from "./StatsPanel"
 import { StatusBar } from "./StatusBar"
+import { TimelineStrip } from "./TimelineStrip"
 
 const MARGIN = 15
-const CARD_STEP = 124
-const CARD_GAP = 12
-const CARD_H = 108
+const LEFT_PANEL = 280
 
 export class Hud extends Container {
     private battle: Battle
-    private bar = new Container()
-    private cards = new Map<Action, ActionCard>()
+    private actionBar: ActionBar
     private endTurn = new EndTurnButton()
     private turnBanner = new Container()
     private turnBg = new Graphics()
@@ -27,23 +24,16 @@ export class Hud extends Container {
     private toastAnim?: { stop: () => void }
     private stats = new StatsPanel()
     private statusBar = new StatusBar()
-    private gameOver = new GameOverPanel()
     private timeline = new TimelineStrip()
+    private gameOver = new GameOverPanel()
 
     private viewW = 0
     private viewH = 0
-    private barW = 0
 
     constructor(battle: Battle) {
         super()
         this.battle = battle
-
-        for (const action of battle.allActions) {
-            const card = new ActionCard(action)
-            card.onPress = () => battle.selectAction(action)
-            this.bar.addChild(card)
-            this.cards.set(action, card)
-        }
+        this.actionBar = new ActionBar(battle)
 
         this.endTurn.onPress = () => void battle.endTurn()
 
@@ -70,11 +60,11 @@ export class Hud extends Container {
             this.stats,
             this.statusBar,
             this.turnBanner,
+            this.timeline,
             this.toast,
-            this.bar,
+            this.actionBar,
             this.endTurn,
             this.gameOver,
-            this.timeline,
         )
 
         battle.onChange = () => this.refresh()
@@ -85,7 +75,23 @@ export class Hud extends Container {
             battle.reset()
         }
 
+        window.addEventListener("keydown", this.onKey)
         this.refresh()
+    }
+
+    public override destroy(options?: DestroyOptions) {
+        window.removeEventListener("keydown", this.onKey)
+        super.destroy(options)
+    }
+
+    private onKey = (e: KeyboardEvent) => {
+        if (!this.interactiveChildren) return // paused (a popup is open)
+        if (e.key === "Escape") {
+            this.battle.cancelSelection()
+            return
+        }
+        const n = Number(e.key)
+        if (n >= 1 && n <= 9) this.actionBar.press(n)
     }
 
     private showToast(text: string) {
@@ -110,13 +116,7 @@ export class Hud extends Container {
         const b = this.battle
         const myTurn = b.phase === "player"
 
-        for (const [action, card] of this.cards) {
-            card.visible = b.isVisible(action)
-            const on = action.kind === "instant" && !!action.isOn?.()
-            card.setSelected(b.selectedAction === action || on)
-            card.setEnabled(myTurn && !b.unusableReason(action))
-        }
-        this.layoutBar()
+        this.actionBar.refresh()
         this.endTurn.setEnabled(myTurn)
 
         this.turnLabel.text = `Turn ${b.turn}  -  ${b.phase === "enemy" ? "Enemy turn" : "Your turn"}`
@@ -137,31 +137,11 @@ export class Hud extends Container {
             shown,
             shown === b.player ? b.abilities.flatMap((a) => a.resources) : [],
         )
-
-        this.timeline.show(b.forecast)
-        this.layoutTimeline()
-    }
-
-    /** Lay out only the visible cards and center them */
-    private layoutBar() {
-        let x = 0
-        for (const card of this.cards.values()) {
-            if (!card.visible) continue
-            card.x = x
-            x += CARD_STEP
-        }
-        this.barW = Math.max(0, x - CARD_GAP)
-
-        if (this.viewW === 0) return
-        // Keep the action bar clear of the End Turn button
-        const reserved = (EndTurnButton.WIDTH + MARGIN * 2) * 2
-        const scale = Math.max(
-            0.4,
-            Math.min(1, (this.viewW - reserved) / Math.max(1, this.barW)),
+        this.timeline.show(
+            b.forecast,
+            Math.max(300, this.viewW - LEFT_PANEL - MARGIN),
+            b.activeStep,
         )
-        this.bar.scale.set(scale)
-        this.bar.x = (this.viewW - this.barW * scale) / 2
-        this.bar.y = this.viewH - CARD_H * scale - MARGIN
     }
 
     public resize(width: number, height: number) {
@@ -172,22 +152,18 @@ export class Hud extends Container {
         this.statusBar.position.set(MARGIN, MARGIN + 130 + 12)
         this.turnBanner.position.set(width / 2, MARGIN)
         this.toast.position.set(width / 2, MARGIN + 46)
+        this.timeline.position.set(LEFT_PANEL, MARGIN + 84)
 
         this.endTurn.position.set(
             width - EndTurnButton.WIDTH - MARGIN,
             height - EndTurnButton.HEIGHT - MARGIN,
         )
-
-        this.layoutBar()
+        this.actionBar.resize(
+            width,
+            height,
+            (EndTurnButton.WIDTH + MARGIN * 2) * 2,
+        )
         this.gameOver.resize(width, height)
-    }
-
-    private layoutTimeline() {
-        if (this.viewW === 0) return
-        this.timeline.scale.set(1)
-        const w = this.timeline.width
-        const s = Math.min(1, (this.viewW - 30) / Math.max(1, w))
-        this.timeline.scale.set(s)
-        this.timeline.position.set((this.viewW - w * s) / 2, MARGIN + 84)
+        this.refresh()
     }
 }
