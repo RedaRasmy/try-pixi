@@ -12,13 +12,13 @@ export const LEVELS: LevelDef[] = [
         id: "escape",
         name: "The Escape",
         tagline:
-            "Three doors stand between you and freedom. Every guard is armed.",
+            "Few doors stand between you and freedom. Every guard is armed.",
         stages: ["yard", "corridor", "armory"],
     },
     {
         id: "monster",
-        name: "Survive The Monster",
-        tagline: "Something is hunting you in the dark. How long can you last?",
+        name: "Monster",
+        tagline: "Don't pee yourself.",
         stages: [],
         comingSoon: true,
     },

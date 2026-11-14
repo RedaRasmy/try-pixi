@@ -3,7 +3,7 @@ import { Container, Graphics, Text } from "pixi.js"
 import { LEVELS } from "../data/Levels"
 import type { LevelDef } from "../data/Levels"
 
-export const GAME_TITLE = "NEN TACTICS"
+export const GAME_TITLE = "4th Prince Journey"
 
 const CARD_W = 480
 const CARD_H = 112
@@ -110,7 +110,7 @@ export class MainMenu extends Container {
         title.position.set(CARD_W / 2, 0)
 
         const subtitle = new Text({
-            text: "CHOOSE A LEVEL",
+            text: "Try Nen & Laplace Demon yourself",
             style: {
                 fill: 0x7dd3fc,
                 fontSize: 14,
