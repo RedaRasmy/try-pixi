@@ -5,10 +5,10 @@ import type { Ticker } from "pixi.js"
 import { Container } from "pixi.js"
 import { engine } from "../../getEngine"
 import { SettingsPopup } from "../../popups/SettingsPopup"
-import { LEVEL } from "./Level"
+import { LEVEL } from "./data/Level"
 import { Battle } from "./Battle"
-import { Board } from "./Board"
-import { Hud } from "./Hud"
+import { Board } from "./world/Board"
+import { Hud } from "./ui/Hud"
 
 /** The screen that holds the app */
 export class MainScreen extends Container {

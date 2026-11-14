@@ -1,8 +1,8 @@
-import type { Action } from "./Actions"
-import type { Tile } from "./Board"
-import type { Entity } from "./Entity"
-import type { TurnPlan } from "./Planner"
-import type { Script } from "./Script"
+import type { Action } from "../core/Actions"
+import type { Tile } from "../world/Board"
+import type { Entity } from "../world/Entity"
+import type { TurnPlan } from "../core/Planner"
+import type { Script } from "../core/Script"
 
 /** A bar shown in the HUD (charge, mana, rage...) */
 export interface Resource {

@@ -1,5 +1,4 @@
 import { Container, Graphics, Text } from "pixi.js"
-
 import { ActionButton } from "./ActionButton"
 
 export class GameOverPanel extends Container {

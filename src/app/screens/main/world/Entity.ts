@@ -1,9 +1,9 @@
 import { animate } from "motion"
 import { Container, Graphics, Text } from "pixi.js"
-import type { Status } from "./Status"
+import type { Status } from "../core/Status"
 import type { Board, Tile } from "./Board"
-import type { Stats } from "./Stats"
-import { sim, record } from "./Script"
+import type { Stats } from "../core/Stats"
+import { sim, record } from "../core/Script"
 
 export interface EntityOptions {
     name: string

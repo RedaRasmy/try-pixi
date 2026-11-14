@@ -1,7 +1,7 @@
-import type { AttackAction } from "./Actions"
+import type { AttackAction } from "../core/Actions"
 import type { Board } from "./Board"
 import { Entity } from "./Entity"
-import type { Status } from "./Status"
+import type { Status } from "../core/Status"
 import type { Player } from "./Player"
 
 /** A copy of the player: same stats, actions and (live) status multipliers */

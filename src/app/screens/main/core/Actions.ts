@@ -1,5 +1,5 @@
-import type { Entity } from "./Entity"
-import type { IconKind } from "./Icons"
+import type { Entity } from "../world/Entity"
+import type { IconKind } from "../ui/Icons"
 
 interface ActionBase {
     id: string

@@ -2,9 +2,9 @@ import { Text } from "pixi.js"
 
 import type { Board, Tile } from "./Board"
 import { tileKey } from "./Board"
-import type { Forecast } from "./Battle"
+import type { Forecast } from "../Battle"
 import { Entity } from "./Entity"
-import { wait } from "./Script"
+import { wait } from "../core/Script"
 
 export interface PreviewOptions {
     /** Tile keys the player can see. Everything else stays hidden. */

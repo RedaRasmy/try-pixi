@@ -4,7 +4,7 @@ import {
   randomBool,
   randomFloat,
   randomInt,
-} from "../../../engine/utils/random";
+} from "../../../../engine/utils/random";
 
 export enum DIRECTION {
   NE,

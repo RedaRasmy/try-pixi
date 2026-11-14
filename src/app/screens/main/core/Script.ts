@@ -1,5 +1,5 @@
-import type { Tile } from "./Board"
-import type { Entity } from "./Entity"
+import type { Tile } from "../world/Board"
+import type { Entity } from "../world/Entity"
 
 /** A turn written as a script. Each `yield` is something to wait for (an animation or a pause). */
 export type Script<T = void> = Generator<

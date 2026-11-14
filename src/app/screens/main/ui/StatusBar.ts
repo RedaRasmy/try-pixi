@@ -1,7 +1,7 @@
 import { Container, Graphics, Text } from "pixi.js"
 
-import type { Resource } from "./Ability"
-import type { Entity } from "./Entity"
+import type { Resource } from "../abilities/Ability"
+import type { Entity } from "../world/Entity"
 
 const WIDTH = 250
 

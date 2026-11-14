@@ -1,7 +1,7 @@
 import { BaseAbility } from "./Ability"
-import type { Action } from "./Actions"
-import type { Battle } from "./Battle"
-import type { Status } from "./Status"
+import type { Action } from "../core/Actions"
+import type { Battle } from "../Battle"
+import type { Status } from "../core/Status"
 
 export const ZETSU = "zetsu"
 export const TEN = "ten"

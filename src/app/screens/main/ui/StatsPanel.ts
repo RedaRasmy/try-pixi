@@ -1,6 +1,6 @@
 import { Container, Graphics, Text } from "pixi.js"
 
-import type { Entity } from "./Entity"
+import type { Entity } from "../world/Entity"
 import { HeartMeter, StatRow } from "./Meters"
 
 export class StatsPanel extends Container {

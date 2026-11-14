@@ -1,8 +1,8 @@
 import type { AttackAction } from "./Actions"
 import { computeDamage } from "./Actions"
-import type { Board, PathNode, Tile } from "./Board"
-import { buildPath, manhattan, tileKey } from "./Board"
-import type { Entity } from "./Entity"
+import type { Board, PathNode, Tile } from "../world/Board"
+import { buildPath, manhattan, tileKey } from "../world/Board"
+import type { Entity } from "../world/Entity"
 import { record } from "./Script"
 import type { Script } from "./Script"
 

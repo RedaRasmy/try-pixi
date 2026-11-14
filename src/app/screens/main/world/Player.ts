@@ -1,7 +1,7 @@
-import { PLAYER_ACTIONS } from "./Actions"
+import { PLAYER_ACTIONS } from "../core/Actions"
 import type { Board } from "./Board"
 import { Entity } from "./Entity"
-import { createStats } from "./Stats"
+import { createStats } from "../core/Stats"
 
 export class Player extends Entity {
     public readonly actions = PLAYER_ACTIONS

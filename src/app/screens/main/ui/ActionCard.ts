@@ -1,7 +1,6 @@
 import { Container, Graphics, Text } from "pixi.js"
-
-import type { Action } from "./Actions"
-import { groupColor } from "./Actions"
+import type { Action } from "../core/Actions"
+import { groupColor } from "../core/Actions"
 import { createIcon } from "./Icons"
 
 export const CARD_W = 116

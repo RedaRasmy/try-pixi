@@ -1,4 +1,4 @@
-import type { AttackAction } from "./Actions"
+import type { AttackAction } from "../core/Actions"
 
 export interface EnemyDef {
     name: string

@@ -1,12 +1,12 @@
 import type { Board, Tile } from "./Board"
-import { ENEMY_TYPES } from "./Enemies"
-import type { EnemyDef, EnemyType } from "./Enemies"
+import { ENEMY_TYPES } from "../data/Enemies"
+import type { EnemyDef, EnemyType } from "../data/Enemies"
 import { Entity } from "./Entity"
-import { EN, makeStatus } from "./Nen"
-import type { PlanHooks, TurnPlan } from "./Planner"
-import { executePlan, planTurn } from "./Planner"
-import type { Script } from "./Script"
-import { createStats } from "./Stats"
+import { EN, makeStatus } from "../abilities/Nen"
+import type { PlanHooks, TurnPlan } from "../core/Planner"
+import { executePlan, planTurn } from "../core/Planner"
+import type { Script } from "../core/Script"
+import { createStats } from "../core/Stats"
 
 export class Enemy extends Entity {
     private def: EnemyDef

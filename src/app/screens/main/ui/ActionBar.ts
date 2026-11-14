@@ -1,9 +1,8 @@
 import { Container, Graphics, Text } from "pixi.js"
-
 import { ActionCard, CARD_H, CARD_W } from "./ActionCard"
-import type { Action } from "./Actions"
-import { describeAction, groupColor } from "./Actions"
-import type { Battle } from "./Battle"
+import type { Action } from "../core/Actions"
+import { describeAction, groupColor } from "../core/Actions"
+import type { Battle } from "../Battle"
 
 const GAP = 8
 const TAB_H = 28

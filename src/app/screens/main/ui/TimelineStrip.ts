@@ -1,6 +1,6 @@
 import { Container, Graphics, Text } from "pixi.js"
 
-import type { Forecast } from "./Battle"
+import type { Forecast } from "../Battle"
 
 /** What the preview shows, in order. The step being replayed is highlighted. */
 export class TimelineStrip extends Container {
