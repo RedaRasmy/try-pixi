@@ -5,7 +5,6 @@ import type { Ticker } from "pixi.js"
 import { Container } from "pixi.js"
 import { engine } from "../../getEngine"
 import { SettingsPopup } from "../../popups/SettingsPopup"
-import { LEVEL } from "./data/Level"
 import { Battle } from "./Battle"
 import { Board } from "./world/Board"
 import { Hud } from "./ui/Hud"
@@ -28,7 +27,7 @@ export class MainScreen extends Container {
         this.mainContainer = new Container()
         this.addChild(this.mainContainer)
 
-        this.board = new Board(LEVEL)
+        this.board = new Board()
         this.mainContainer.addChild(this.board)
 
         this.battle = new Battle(this.board)

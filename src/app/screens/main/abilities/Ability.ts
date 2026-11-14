@@ -11,6 +11,8 @@ export interface Resource {
     color: number
     value: number
     max: number
+    /** Show "4/6" instead of a percentage */
+    count?: boolean
 }
 
 export interface Ability {
@@ -45,14 +47,18 @@ export interface Ability {
     reset(): void
     /** A reason this target can't be attacked right now, or null */
     blocksTarget(target: Entity): string | null
-    /** The player just closed their eyes */
-    onEyesClosed(): void
+    /** The player just used one of the actions (any ability). Resources, activation... */
+    afterAction(action: Action): void
+    /** Hovering yourself with a self action selected: tiles it would reveal (zones...) */
+    selfCastPreview(action: Action): { tiles: Tile[]; label: string } | null
     /** Sync what is drawn (clone visibility...) with the current state */
     refreshView(): void
     /** Save the ability's state. Call the returned function to restore it (used by the preview). */
     snapshot(): () => void
     /** Tiles the player can foresee while previewing, or null if there is no limit */
     previewTiles(): Tile[] | null
+    /** The player is leaving this map. Position-based effects should end. */
+    onMapChange(): void
 }
 
 /** Do-nothing defaults. Override only what your ability needs. */
@@ -65,7 +71,12 @@ export abstract class BaseAbility implements Ability {
     public blocksTarget(_target: Entity): string | null {
         return null
     }
-    public onEyesClosed() {}
+    public afterAction(_action: Action) {}
+    public selfCastPreview(
+        _action: Action,
+    ): { tiles: Tile[]; label: string } | null {
+        return null
+    }
     public refreshView() {}
 
     public perceivedTarget(_viewer: Entity): Entity | null {
@@ -102,4 +113,5 @@ export abstract class BaseAbility implements Ability {
     public previewTiles(): Tile[] | null {
         return null
     }
+    public onMapChange() {}
 }

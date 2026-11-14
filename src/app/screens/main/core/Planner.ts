@@ -5,6 +5,7 @@ import { buildPath, manhattan, tileKey } from "../world/Board"
 import type { Entity } from "../world/Entity"
 import { record } from "./Script"
 import type { Script } from "./Script"
+import { logHit } from "../ui/CombatLog"
 
 export interface PlannedAttack {
     target: Entity
@@ -20,6 +21,8 @@ export interface PlanHooks {
     onDamage?: (target: Entity, dealt: number) => void
     /** Runs after a hit lands (pushes, effects...) */
     afterHit?: (target: Entity, action: AttackAction) => Script
+    /** Damage is only temporary: lethal hits knock out instead of killing */
+    temporary?: boolean
 }
 
 function pickAttacks(
@@ -30,9 +33,13 @@ function pickAttacks(
     canSee: boolean,
     apLeft: number,
 ): PlannedAttack[] {
-    if (!canSee) return []
     const usable = actions
-        .filter((a) => distance >= a.minRange && distance <= a.maxRange)
+        .filter(
+            (a) =>
+                distance >= a.minRange &&
+                distance <= a.maxRange &&
+                (a.needsSight === false || canSee),
+        )
         .sort(
             (a, b) =>
                 computeDamage(b, self, target) - computeDamage(a, self, target),
@@ -129,7 +136,7 @@ export function* executePlan(
     yield self.followPath(plan.path)
 
     for (const { target, action } of plan.attacks) {
-        if (self.isDead || target.isDead) break
+        if (self.isOut || target.isOut) break
         // The target may have been pushed away by an earlier hit
         if (!self.canHit(target, action)) break
 
@@ -144,8 +151,10 @@ export function* executePlan(
             to: { col: target.col, row: target.row },
             damage,
             kills: damage >= target.stats.hp,
+            temp: !!hooks.temporary,
         })
-        yield target.takeDamage(damage)
+        yield target.takeDamage(damage, hooks.temporary)
+        logHit(self, target, action, dealt, !!hooks.temporary)
         hooks.onDamage?.(target, dealt)
         if (hooks.afterHit) yield* hooks.afterHit(target, action)
     }

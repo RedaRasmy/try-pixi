@@ -13,3 +13,10 @@ export interface Status {
 
     sense?: number
 }
+
+export const UNCONSCIOUS = "unconscious"
+export const unconsciousStatus = (): Status => ({
+    id: UNCONSCIOUS,
+    name: "Unconscious (until Laplace ends)",
+    color: 0x94a3b8,
+})

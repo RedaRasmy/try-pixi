@@ -76,6 +76,7 @@ export class Preview {
                 stats: { ...e.stats },
             })
             puppet.alpha = e.alpha
+            if (e.unconscious) puppet.setUnconscious(true)
             puppet.visible = zone.has(tileKey(o.from)) && !puppet.isDead
 
             const tag = new Text({
@@ -146,7 +147,7 @@ export class Preview {
                 }
 
                 if (target.visible) {
-                    await target.takeDamage(ev.damage)
+                    await target.takeDamage(ev.damage, ev.temp)
                     if (!o.isEnemy(ev.actor)) {
                         target.showFloatingText("temporary", 0xfbbf24, 22, 30)
                     }
@@ -179,6 +180,17 @@ export class Preview {
                         puppet.stats.hp + ev.amount,
                     )
                     puppet.drawHp()
+                }
+                return
+            }
+            case "wake": {
+                const puppet = this.puppets.get(ev.target)
+                if (!puppet) return
+                if (puppet.visible) {
+                    puppet.wake()
+                    await wait(450)
+                } else {
+                    puppet.setUnconscious(false)
                 }
                 return
             }

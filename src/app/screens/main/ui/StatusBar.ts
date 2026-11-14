@@ -19,7 +19,9 @@ export class StatusBar extends Container {
                 style: { fill: 0xcbd5e1, fontSize: 13, fontWeight: "bold" },
             })
             const percent = new Text({
-                text: `${Math.round(ratio * 100)}%`,
+                text: r.count
+                    ? `${r.value}/${r.max}`
+                    : `${Math.round(ratio * 100)}%`,
                 style: { fill: r.color, fontSize: 13, fontWeight: "bold" },
             })
             percent.anchor.set(1, 0)

@@ -21,16 +21,7 @@ const hit = (
     maxRange: number,
     baseDamage: number,
     push?: number,
-): AttackAction => ({
-    kind: "attack",
-    id,
-    name,
-    apCost,
-    minRange,
-    maxRange,
-    baseDamage,
-    push,
-})
+): AttackAction => ({ id, name, apCost, minRange, maxRange, baseDamage, push })
 
 export const ENEMY_TYPES = {
     dummy: {

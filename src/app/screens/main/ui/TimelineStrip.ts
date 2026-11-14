@@ -59,7 +59,13 @@ export class TimelineStrip extends Container {
                         `${step.attacks.length}x hit  -${total}${enemy ? "" : " temp"}`,
                     )
                 }
-                if (step.attacks.some((a) => a.kills)) parts.push("KO")
+                if (step.attacks.some((a) => a.kills)) {
+                    parts.push(
+                        step.attacks.some((a) => a.kills && a.temp)
+                            ? "KNOCKOUT"
+                            : "KO",
+                    )
+                }
                 if (step.attacks.some((a) => a.pushTo)) parts.push("push")
             }
             pill(parts.join("  ·  "), enemy ? 0xec4899 : 0x22d3ee, i === active)

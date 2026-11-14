@@ -5,6 +5,7 @@ import type { Battle } from "../Battle"
 import { manhattan } from "../world/Board"
 import type { Tile } from "../world/Board"
 import { Clone } from "../world/Clone"
+import { combatLog } from "../ui/CombatLog"
 import type { Entity } from "../world/Entity"
 import { EYES, ZETSU } from "./Nen"
 import { executePlan, planTurn } from "../core/Planner"
@@ -22,6 +23,8 @@ const REBUILD_COST = 10
 const REGEN = 10
 /** false = the clone is only drawn while your eyes are closed (the preview) */
 const CLONE_ALWAYS_VISIBLE = false
+/** Actions that can complete the activation (Zetsu + closed eyes) */
+const TRIGGERS = ["zetsu-on", "close-eyes"]
 
 export class LaplaceDemon extends BaseAbility {
     public readonly charge: Resource = {
@@ -38,7 +41,7 @@ export class LaplaceDemon extends BaseAbility {
     private center = { col: 0, row: 0 }
     /** Enemies inside the zone on activation that still believe the clone */
     private deceived = new Set<Entity>()
-    /** Clone damage dealt to each enemy (given back if the ability ends) */
+    /** Clone damage dealt to each enemy (given back when the ability ends) */
     private ledger = new Map<Entity, number>()
 
     constructor(private battle: Battle) {
@@ -46,14 +49,15 @@ export class LaplaceDemon extends BaseAbility {
 
         this.actions = [
             {
-                kind: "instant",
                 id: "new-clone",
                 name: "New Clone",
                 group: "Senses",
                 subtitle: `${REBUILD_COST} charge`,
                 description:
-                    "Create a new clone. Enemies inside the zone are fooled again. Only available while Laplace is active and the clone is gone.",
+                    "Create a new clone. Enemies inside the zone are fooled again. Only while Laplace is active and the clone is gone. Select it, then click yourself.",
                 apCost: 2,
+                minRange: 0,
+                maxRange: 0,
                 visible: () => this.active && !this.clone,
                 unavailable: () =>
                     this.charge.value < REBUILD_COST
@@ -72,6 +76,35 @@ export class LaplaceDemon extends BaseAbility {
 
     public override get entities(): Entity[] {
         return this.clone ? [this.clone] : []
+    }
+
+    // ---------- Activation ----------
+
+    /** Using Zetsu or Close Eyes while the other is already on starts the ability */
+    public override afterAction(action: Action) {
+        const p = this.battle.player
+        if (this.active || !TRIGGERS.includes(action.id)) return
+        if (!p.hasStatus(ZETSU) || !p.hasStatus(EYES)) return
+
+        if (this.charge.value < ACTIVATION_COST) {
+            this.battle.say("Not enough Laplace charge")
+            return
+        }
+        this.activate()
+    }
+
+    /** Hovering yourself: show the zone if this action would complete the activation */
+    public override selfCastPreview(action: Action) {
+        const p = this.battle.player
+        if (this.active) return null
+        const completes =
+            (action.id === "zetsu-on" && p.hasStatus(EYES)) ||
+            (action.id === "close-eyes" && p.hasStatus(ZETSU))
+        if (!completes) return null
+        return {
+            tiles: this.battle.board.tilesInRange(p, 0, ZONE_RADIUS),
+            label: `Starts Laplace · radius ${ZONE_RADIUS} · ${ACTIVATION_COST} charge`,
+        }
     }
 
     // ---------- Ability hooks ----------
@@ -98,9 +131,13 @@ export class LaplaceDemon extends BaseAbility {
         return this.active && this.battle.player.hasStatus(EYES)
     }
 
+    public override previewTiles() {
+        return this.battle.board.tilesInRange(this.center, 0, ZONE_RADIUS, true)
+    }
+
     public override visibleTiles() {
         if (!this.showsForecast()) return null
-        return this.battle.board.tilesInRange(this.center, 0, ZONE_RADIUS, true)
+        return this.previewTiles()
     }
 
     public override refreshView() {
@@ -111,16 +148,6 @@ export class LaplaceDemon extends BaseAbility {
 
     public override isTileSafe(tile: Tile) {
         return !this.active || this.inZone(tile)
-    }
-
-    /** Eyes closed with Zetsu on starts the ability */
-    public override onEyesClosed() {
-        if (this.active || !this.battle.player.hasStatus(ZETSU)) return
-        if (this.charge.value < ACTIVATION_COST) {
-            this.battle.say("Not enough Laplace charge")
-            return
-        }
-        this.activate()
     }
 
     public override onDamageDealt(target: Entity, amount: number) {
@@ -134,10 +161,16 @@ export class LaplaceDemon extends BaseAbility {
         }
     }
 
+    public override onMapChange() {
+        this.end("You left the map")
+    }
+
+    /** The clone's damage is temporary: lethal hits knock out instead of killing */
     public override *playTurn(): Script {
         const clone = this.clone
         if (!this.active || !clone) return
         yield* executePlan(clone, this.planClone(), {
+            temporary: true,
             onDamage: (target, dealt) => this.onDamageDealt(target, dealt),
             afterHit: (target, action) =>
                 this.battle.applyPush(clone, target, action),
@@ -212,11 +245,11 @@ export class LaplaceDemon extends BaseAbility {
         this.clone = null
     }
 
-    /** The clone fights like the player and can walk through the player */
+    /** The clone fights like the player: walk toward the nearest conscious enemy, then attack */
     private planClone(): TurnPlan {
         const b = this.battle
         const clone = this.clone
-        const alive = b.enemies.filter((e) => !e.isDead)
+        const alive = b.enemies.filter((e) => !e.isOut)
         if (!clone || alive.length === 0) return { path: [], attacks: [] }
 
         const enemy = alive.reduce((best, e) =>
@@ -247,6 +280,7 @@ export class LaplaceDemon extends BaseAbility {
         this.dropClone()
         this.deceived.clear()
         this.battle.say(reason)
+        combatLog.add(reason, 0xc4b5fd)
     }
 
     private activate() {
@@ -264,11 +298,12 @@ export class LaplaceDemon extends BaseAbility {
             0xa78bfa,
             0.16,
         )
-        b.say(
+        const text =
             this.deceived.size > 0
-                ? "Enemies in the zone see only the clone."
-                : "Nobody was inside the zone, no one is fooled.",
-        )
+                ? "Laplace Demon starts. Enemies in the zone see only the clone."
+                : "Laplace Demon starts, but nobody is inside the zone."
+        b.say(text)
+        combatLog.add(text, 0xc4b5fd)
     }
 
     private end(reason: string) {
@@ -281,15 +316,18 @@ export class LaplaceDemon extends BaseAbility {
         b.player.removeStatus(ZONE)
         if (!sim.dry) b.board.clearHighlight("zone")
 
-        // Temporary damage is given back (a kill stays: dead enemies are skipped)
+        // Everyone the clone knocked out wakes up, then the temporary damage comes back
+        for (const enemy of b.enemies) {
+            if (!enemy.unconscious) continue
+            enemy.wake()
+            combatLog.add(`${enemy.displayName} wakes up`, 0x4ade80)
+        }
         for (const [enemy, amount] of this.ledger) {
             if (!enemy.isDead) enemy.heal(amount)
         }
         this.ledger.clear()
-        b.say(reason)
-    }
 
-    public override previewTiles() {
-        return this.battle.board.tilesInRange(this.center, 0, ZONE_RADIUS, true)
+        b.say(reason)
+        combatLog.add(`Laplace Demon ended: ${reason}`, 0xc4b5fd)
     }
 }

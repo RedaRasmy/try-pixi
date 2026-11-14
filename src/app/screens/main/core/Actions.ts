@@ -1,49 +1,45 @@
 import type { Entity } from "../world/Entity"
 import type { IconKind } from "../ui/Icons"
 
-interface ActionBase {
+export interface Action {
     id: string
     name: string
     apCost: number
-    /** The card only appears while the player has this status */
-    requiresStatus?: string
-    forbidsStatus?: string
-    /** Extra rule: return a reason when unusable, or null when fine */
-    unavailable?: () => string | null
-    visible?: () => boolean
-    /** Tab the card lives in. Defaults to "Combat". */
-    group?: string
-    /** Longer text for the tooltip */
-    description?: string
-    /** Optional icon from Icons.ts. Without one the card shows a letter badge. */
-    icon?: IconKind
-}
-
-/** Pick a target on the board within range */
-export interface AttackAction extends ActionBase {
-    kind: "attack"
+    /** Range 0 = targets yourself: select the action, then click your own tile */
     minRange: number
     maxRange: number
-    baseDamage: number
+    /** false = ignores walls (default true) */
+    needsSight?: boolean
+    /** Set = hits an enemy for this much (before multipliers) */
+    baseDamage?: number
+    /** Tiles the target slides away from the attacker */
     push?: number
-    subtitle?: string
-}
+    /** Can be used with your eyes closed */
+    blind?: boolean
 
-/** Runs immediately when clicked */
-export interface InstantAction extends ActionBase {
-    kind: "instant"
-    /** Small text under the name on the card */
+    group?: string
     subtitle?: string
+    description?: string
+    icon?: IconKind
+
+    requiresStatus?: string
+    forbidsStatus?: string
+    /** Hide the card when this returns false */
+    visible?: () => boolean
+    /** A reason it can't be used right now, or null */
+    unavailable?: () => string | null
     /** For toggles: is it currently on? */
     isOn?: () => boolean
-    run: () => void
+    /** The effect (self actions) */
+    run?: () => void
 }
 
-export type Action = AttackAction | InstantAction
+export type AttackAction = Action & { baseDamage: number }
+
+export const isSelfAction = (a: Action) => a.maxRange === 0
 
 export const PLAYER_ACTIONS: AttackAction[] = [
     {
-        kind: "attack",
         id: "punch",
         name: "Punch",
         apCost: 3,
@@ -52,7 +48,6 @@ export const PLAYER_ACTIONS: AttackAction[] = [
         baseDamage: 15,
     },
     {
-        kind: "attack",
         id: "kick",
         name: "Long Kick",
         apCost: 4,
@@ -60,17 +55,9 @@ export const PLAYER_ACTIONS: AttackAction[] = [
         maxRange: 2,
         baseDamage: 20,
     },
-    {
-        kind: "attack",
-        id: "rock",
-        name: "Throw Rock",
-        apCost: 2,
-        minRange: 3,
-        maxRange: 8,
-        baseDamage: 5,
-    },
 ]
 
+/** Damage = base x attacker stat x attacker's multipliers x target's multipliers */
 export function computeDamage(
     action: AttackAction,
     attacker: Entity,
@@ -91,15 +78,15 @@ export const GROUP_COLORS: Record<string, number> = {
 export const groupColor = (group?: string) =>
     GROUP_COLORS[group ?? "Combat"] ?? 0x94a3b8
 
-/** Tooltip text. Attacks describe themselves, others use `description` or `subtitle`. */
 export function describeAction(a: Action) {
     if (a.description) return a.description
-    if (a.kind === "attack") {
-        const range =
-            a.minRange === a.maxRange
-                ? `${a.maxRange}`
-                : `${a.minRange}-${a.maxRange}`
-        return `Range ${range}  ·  base damage ${a.baseDamage}${a.push ? `  ·  pushes ${a.push}` : ""}`
-    }
-    return a.subtitle ?? ""
+    if (isSelfAction(a)) return a.subtitle ?? ""
+    const range =
+        a.minRange === a.maxRange
+            ? `${a.maxRange}`
+            : `${a.minRange}-${a.maxRange}`
+    const parts = [`Range ${range}`, `base damage ${a.baseDamage ?? 0}`]
+    if (a.push) parts.push(`pushes ${a.push}`)
+    if (a.needsSight === false) parts.push("ignores walls")
+    return parts.join("  ·  ")
 }

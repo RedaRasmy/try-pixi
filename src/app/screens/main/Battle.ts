@@ -1,80 +1,48 @@
 import type { Ability } from "./abilities/Ability"
-import type { Action, AttackAction } from "./core/Actions"
-import { computeDamage } from "./core/Actions"
+import type { Action } from "./core/Actions"
+import { computeDamage, isSelfAction } from "./core/Actions"
 import type { Board, Tile } from "./world/Board"
 import { buildPath, manhattan, tileKey } from "./world/Board"
+import { combatLog, logHit } from "./ui/CombatLog"
 import { Enemy } from "./world/Enemy"
 import type { Entity } from "./world/Entity"
+import { computeForecast } from "./Forecast"
+import type { Forecast } from "./Forecast"
 import { LaplaceDemon } from "./abilities/LaplaceDemon"
-import { ENEMY_STARTS, PLAYER_START } from "./data/Level"
-import { EYES, EYES_SENSE, Nen, ZETSU } from "./abilities/Nen"
+import { MAPS, START_MAP } from "./data/Maps"
+import type { ExitDef, MapDef } from "./data/Maps"
+import { Nen } from "./abilities/Nen"
+import { Perception } from "./Perception"
+import { Pistol } from "./abilities/Pistol"
 import { Player } from "./world/Player"
-import type { Script, SimEvent } from "./core/Script"
-import { pause, record, runDry, runLive, sim, wait } from "./core/Script"
 import { Preview } from "./world/Preview"
+import type { Script } from "./core/Script"
+import { pause, record, runLive, sim, wait } from "./core/Script"
+
+export type {
+    Forecast,
+    ForecastAttack,
+    ForecastStep,
+    Outcome,
+    PlaybackItem,
+} from "./Forecast"
 
 /** player = waiting for input, busy = an animation is playing */
 export type Phase = "player" | "enemy" | "busy" | "over"
 
-export interface ForecastAttack {
-    from: Tile
-    to: Tile
-    damage: number
-    kills: boolean
-    target: Entity
-    pushTo?: Tile
-    /** The push drags the real player out of an ability's zone */
-    breaks?: boolean
-}
-
-export interface ForecastStep {
-    actor: Entity
-    name: string
-    team: "ally" | "enemy"
-    start: Tile
-    path: Tile[]
-    attacks: ForecastAttack[]
-    idle?: string
-}
-
-/** Where someone stands and how healthy they are once the turn is over */
-export interface Outcome {
-    entity: Entity
-    name: string
-    from: Tile
-    tile: Tile
-    hpBefore: number
-    hp: number
-    maxHp: number
-    dead: boolean
-}
-export interface PlaybackItem {
-    ev: SimEvent
-    /** Index in forecast.steps, or -1 when it isn't a timeline step */
-    step: number
-}
-export interface Forecast {
-    steps: ForecastStep[]
-    notes: string[]
-    outcomes: Outcome[]
-    playback: PlaybackItem[]
-    result?: "won" | "lost"
-}
-
 export class Battle {
     public readonly board: Board
+    private currentMapId = START_MAP
     public player!: Player
     public enemies: Enemy[] = []
     public abilities: Ability[] = []
 
     public phase: Phase = "player"
     public turn = 1
-    public selectedAction: AttackAction | null = null
+    public selectedAction: Action | null = null
     public inspected: Entity | null = null
     /** The simulated end of this turn (null when no preview is active) */
     public forecast: Forecast | null = null
-
-    private preview: Preview
     /** Timeline step currently being replayed (-1 = none) */
     public activeStep = -1
 
@@ -82,12 +50,16 @@ export class Battle {
     public onGameOver?: (won: boolean) => void
     public onMessage?: (text: string) => void
 
+    public readonly perception: Perception
+    private preview: Preview
+
     constructor(board: Board) {
         this.board = board
         this.preview = new Preview(board)
+        this.perception = new Perception(this)
         board.onTileTap = (tile) => void this.handleTap(tile)
         board.onTileHover = (tile) => this.handleHover(tile)
-        this.abilities = [new Nen(this), new LaplaceDemon(this)]
+        this.abilities = [new Pistol(), new Nen(this), new LaplaceDemon(this)]
         this.reset()
     }
 
@@ -113,8 +85,15 @@ export class Battle {
         if (this.player) this.player.destroy()
         for (const e of this.enemies) e.destroy()
 
-        this.player = new Player(this.board, PLAYER_START.col, PLAYER_START.row)
-        this.enemies = ENEMY_STARTS.map(
+        this.currentMapId = START_MAP
+        const map = MAPS[this.currentMapId]
+        this.board.load(map)
+        this.player = new Player(
+            this.board,
+            map.playerStart.col,
+            map.playerStart.row,
+        )
+        this.enemies = map.enemies.map(
             (s) => new Enemy(this.board, s.col, s.row, s.type),
         )
         this.board.entityLayer.addChild(this.player)
@@ -126,6 +105,8 @@ export class Battle {
         this.inspected = null
         this.player.startTurn()
 
+        combatLog.clear()
+        combatLog.add("The fight begins", 0x94a3b8)
         this.board.clearHighlight("hover")
         this.refreshHighlights()
         this.onChange?.()
@@ -156,6 +137,7 @@ export class Battle {
         return null
     }
 
+    /** Selecting only arms the action. It happens when you click a target (yourself for range 0). */
     public selectAction(action: Action) {
         if (this.phase !== "player") return
 
@@ -165,15 +147,8 @@ export class Battle {
             return
         }
 
-        if (action.kind === "instant") {
-            this.say("")
-            this.player.spendAp(action.apCost)
-            this.selectedAction = null
-            action.run()
-            for (const a of this.abilities) a.check()
-        } else {
-            this.selectedAction = this.selectedAction === action ? null : action
-        }
+        this.say("")
+        this.selectedAction = this.selectedAction === action ? null : action
         this.refreshHighlights()
         this.onChange?.()
     }
@@ -195,10 +170,11 @@ export class Battle {
         this.say("")
         for (const a of this.abilities) a.onTurnEnd()
         this.clearAllHighlights()
-        this.syncView()
+        this.perception.syncView()
+        combatLog.add(`Turn ${this.turn}: enemy phase`, 0x94a3b8)
         this.onChange?.()
 
-        // The very same script powers the preview (see computeForecast)
+        // The very same script powers the preview (see Forecast.ts)
         if (await runLive(this.enemyPhase())) return
 
         this.turn++
@@ -215,7 +191,7 @@ export class Battle {
      * Everything that happens after you end your turn. Returns true if the fight ended.
      * It runs live (animated) or dry (silent simulation), so the preview can't lie.
      */
-    private *enemyPhase(): Script<boolean> {
+    public *enemyPhase(): Script<boolean> {
         // Clones and other ability entities act first
         for (const ability of this.abilities) {
             yield* pause(300)
@@ -226,9 +202,9 @@ export class Battle {
         }
 
         for (const enemy of this.enemies) {
-            if (enemy.isDead) continue
+            if (enemy.isOut) continue
 
-            const target = this.targetFor(enemy)
+            const target = this.perception.targetFor(enemy)
             if (!target) {
                 record({
                     kind: "idle",
@@ -236,6 +212,10 @@ export class Battle {
                     at: { col: enemy.col, row: enemy.row },
                     reason: "lost track of you",
                 })
+                combatLog.add(
+                    `${enemy.displayName} lost track of you`,
+                    0x94a3b8,
+                )
                 continue
             }
             yield* pause(400)
@@ -267,6 +247,10 @@ export class Battle {
         this.phase = "over"
         this.selectedAction = null
         this.clearAllHighlights()
+        combatLog.add(
+            won ? "Victory!" : "You were defeated",
+            won ? 0x4ade80 : 0xf87171,
+        )
         this.onChange?.()
 
         yield wait(500)
@@ -277,7 +261,8 @@ export class Battle {
     /** Refresh visibility and the HUD after something happened (live only) */
     private changed() {
         if (sim.dry) return
-        this.syncView()
+        this.perception.syncView()
+        this.refreshDoorStates()
         this.onChange?.()
     }
 
@@ -285,8 +270,18 @@ export class Battle {
 
     private async handleTap(tile: Tile) {
         if (this.phase !== "player") return
-        if (this.selectedAction) await this.useAction(this.selectedAction, tile)
-        else await this.tryMove(tile)
+        if (this.board.doorAt(tile)) {
+            if (this.selectedAction) {
+                this.selectedAction = null
+                this.refreshHighlights()
+                this.onChange?.()
+            }
+            await this.tryMove(tile)
+        } else if (this.selectedAction) {
+            await this.useAction(this.selectedAction, tile)
+        } else {
+            await this.tryMove(tile)
+        }
     }
 
     private movementReason() {
@@ -298,6 +293,15 @@ export class Battle {
     }
 
     private async tryMove(tile: Tile) {
+        const exit = this.board.doorAt(tile)
+        if (exit) {
+            const doorReason = this.doorReason(exit)
+            if (doorReason) {
+                this.say(doorReason)
+                return
+            }
+        }
+
         const reason = this.movementReason()
         if (reason) {
             this.say(reason)
@@ -310,23 +314,60 @@ export class Battle {
             this.player.stats.ap,
             this.isBlockedForPlayer,
             (t) => !this.entityAt(t),
+            true,
         )
         const node = found.get(tileKey(tile))
         if (!node || node.dist === 0) return
 
         this.phase = "busy"
         this.clearAllHighlights()
-        await this.player.followPath(buildPath(node))
-        this.syncView()
+        const path = buildPath(node)
+        await this.player.followPath(path)
+        const reachedExit =
+            path.length > 0 && this.board.doorAt(path[path.length - 1])
+        if (reachedExit) await this.changeMap(reachedExit)
+        this.perception.syncView()
         await this.finishAction()
     }
 
-    private async useAction(action: AttackAction, tile: Tile) {
+    private async useAction(action: Action, tile: Tile) {
+        const reason = this.unusableReason(action)
+        if (reason) {
+            this.say(reason)
+            this.cancelSelection()
+            return
+        }
+        if (isSelfAction(action)) await this.useSelfAction(action, tile)
+        else await this.useAttack(action, tile)
+    }
+
+    /** Range 0: you click yourself */
+    private async useSelfAction(action: Action, tile: Tile) {
+        const p = this.player
+        if (tile.col !== p.col || tile.row !== p.row) {
+            this.say(`Click yourself to use ${action.name}`)
+            return
+        }
+
+        this.say("")
+        p.spendAp(action.apCost)
+        this.selectedAction = null
+        action.run?.()
+        combatLog.add(`You use ${action.name}`, 0x93c5fd)
+        for (const a of this.abilities) a.afterAction(action)
+        for (const a of this.abilities) a.check()
+
+        this.refreshHighlights()
+        this.onChange?.()
+    }
+
+    private async useAttack(action: Action, tile: Tile) {
+        const p = this.player
         const target = this.enemies.find(
-            (e) => !e.isDead && e.col === tile.col && e.row === tile.row,
+            (e) => !e.isOut && e.col === tile.col && e.row === tile.row,
         )
         // You can't target what you can't perceive
-        if (!target || !this.playerPerceives(target)) return
+        if (!target || !this.perception.playerPerceives(target)) return
 
         const refusal = this.abilities
             .map((a) => a.blocksTarget(target))
@@ -336,9 +377,9 @@ export class Battle {
             return
         }
 
-        const distance = manhattan(this.player, tile)
-        if (distance < action.minRange || distance > action.maxRange) return
-        if (!this.board.hasLineOfSight(this.player, tile)) {
+        const d = manhattan(p, tile)
+        if (d < action.minRange || d > action.maxRange) return
+        if (!this.board.canHit(p, tile, action)) {
             this.say("A wall is in the way")
             return
         }
@@ -346,12 +387,16 @@ export class Battle {
         this.phase = "busy"
         this.clearAllHighlights()
 
-        this.player.spendAp(action.apCost)
+        p.spendAp(action.apCost)
         this.onChange?.()
-        await target.takeDamage(computeDamage(action, this.player, target))
-        await runLive(this.applyPush(this.player, target, action))
+        const dealt = await target.takeDamage(
+            computeDamage(action as never, p, target),
+        )
+        logHit(p, target, action, dealt)
+        await runLive(this.applyPush(p, target, action))
 
-        const spent = this.player.consumeAttackStatuses()
+        for (const a of this.abilities) a.afterAction(action)
+        const spent = p.consumeAttackStatuses()
         if (spent.length > 0) this.say(`${spent.join(", ")} spent`)
         await this.finishAction()
     }
@@ -371,11 +416,7 @@ export class Battle {
     // ---------- Pushes ----------
 
     /** Slide the target away from the attacker (used by every attacker) */
-    public *applyPush(
-        attacker: Tile,
-        target: Entity,
-        action: AttackAction,
-    ): Script {
+    public *applyPush(attacker: Tile, target: Entity, action: Action): Script {
         if (!action.push || target.isDead) return
         const path = this.pushPath(attacker, target, action.push)
         if (path.length === 0) return
@@ -391,6 +432,10 @@ export class Battle {
                 target === this.player &&
                 !this.abilities.every((a) => a.isTileSafe(landing)),
         })
+        combatLog.add(
+            `${target.displayName} is pushed ${path.length} tile(s)`,
+            0x94a3b8,
+        )
         yield target.slide(path)
     }
 
@@ -424,7 +469,7 @@ export class Battle {
         let entity = tile ? this.entityAt(tile) : undefined
 
         // Can't inspect what is hidden or sits in the dark
-        const fog = this.fogTiles()
+        const fog = this.perception.fogTiles()
         if (
             tile &&
             fog &&
@@ -436,9 +481,11 @@ export class Battle {
         this.inspected = entity ?? null
 
         this.board.clearHighlight("hover")
+        const action = this.selectedAction
         if (entity && this.phase === "player" && !this.movementReason()) {
             const isPlayer = entity === this.player
-            if (!(isPlayer && !this.selectedAction)) {
+            // The player's own movement area is already drawn (and self actions show their own info)
+            if (!(isPlayer && (!action || isSelfAction(action)))) {
                 const ap = isPlayer ? entity.stats.ap : entity.stats.maxAp
                 const color = isPlayer ? 0x3b82f6 : 0xfacc15
                 this.board.highlight(
@@ -455,17 +502,41 @@ export class Battle {
         this.onChange?.()
     }
 
-    /** Path and cost for movement, expected damage for attacks */
+    /**
+     * What hovering a tile tells you:
+     *  - a self action on yourself: its cost, and the zone it would start
+     *  - an attack on an enemy: the damage and the HP left (or why it's impossible)
+     *  - nothing selected: the walking path and its AP cost
+     */
     private drawHoverInfo(tile: Tile) {
-        if (this.movementReason()) return
         const p = this.player
         const action = this.selectedAction
+        const onSelf = tile.col === p.col && tile.row === p.row
 
         if (action) {
+            // ----- Self action: click yourself -----
+            if (isSelfAction(action)) {
+                if (!onSelf) return
+                this.board.addTag(
+                    tile,
+                    `${action.name}  ·  ${action.apCost} AP`,
+                    0x22c55e,
+                    100,
+                )
+                for (const a of this.abilities) {
+                    const cast = a.selfCastPreview(action)
+                    if (!cast) continue
+                    this.board.highlight("hover", cast.tiles, 0xa78bfa, 0.3)
+                    this.board.addTag(tile, cast.label, 0xa78bfa, 130)
+                }
+                return
+            }
+
+            // ----- Attack: damage on the target -----
             const target = this.enemies.find(
-                (e) => !e.isDead && e.col === tile.col && e.row === tile.row,
+                (e) => !e.isOut && e.col === tile.col && e.row === tile.row,
             )
-            if (!target || !this.playerPerceives(target)) return
+            if (!target || !this.perception.playerPerceives(target)) return
 
             const refusal = this.abilities
                 .map((a) => a.blocksTarget(target))
@@ -479,12 +550,12 @@ export class Battle {
                 this.board.addTag(tile, "Out of range", 0x64748b, 100)
                 return
             }
-            if (!this.board.hasLineOfSight(p, tile)) {
+            if (!this.board.canHit(p, tile, action)) {
                 this.board.addTag(tile, "Wall in the way", 0x64748b, 100)
                 return
             }
 
-            const damage = computeDamage(action, p, target)
+            const damage = computeDamage(action as never, p, target)
             const after = Math.max(0, target.stats.hp - damage)
             this.board.drawAttackArrow(p, tile, 0xef4444)
             this.board.addTag(
@@ -498,12 +569,22 @@ export class Battle {
             return
         }
 
-        if (this.entityAt(tile)) return
+        // ----- Nothing selected: walking -----
+        if (this.movementReason() || this.entityAt(tile)) return
+        const exit = this.board.doorAt(tile)
+        if (exit) {
+            const reason = this.doorReason(exit)
+            if (reason) {
+                this.board.addTag(tile, reason, 0xdc2626, 60)
+                return
+            }
+        }
         const found = this.board.getReachable(
             p,
             p.stats.ap,
             this.isBlockedForPlayer,
             (t) => !this.entityAt(t),
+            true,
         )
         const node = found.get(tileKey(tile))
         if (!node || node.dist === 0) return
@@ -517,49 +598,6 @@ export class Battle {
             color,
             60,
         )
-    }
-
-    // ---------- Perception ----------
-
-    /** Can the player see (or feel) this entity right now? */
-    private playerPerceives(e: Entity) {
-        const p = this.player
-        const d = manhattan(p, e)
-        const sense = p.senseRadius
-
-        if (p.hasStatus(EYES)) {
-            // En feels everything, Zetsu users included. Plain eyes-closed doesn't feel Zetsu.
-            if (sense > 0 && d <= sense) return true
-            return !e.hasStatus(ZETSU) && d <= EYES_SENSE
-        }
-        if (!e.hasStatus(ZETSU)) return true
-        return d <= sense || this.board.hasLineOfSight(p, e)
-    }
-
-    /** Hide what the player can't perceive and mark what they only feel */
-    private syncView() {
-        for (const a of this.abilities) a.refreshView()
-
-        const fog = this.fogTiles()
-        const sensed: { tile: Tile; color: number }[] = []
-        for (const e of this.enemies) {
-            const seen = !e.isDead && this.playerPerceives(e)
-            e.visible = seen
-            const inDark =
-                fog && !fog.some((t) => t.col === e.col && t.row === e.row)
-            if (seen && inDark) sensed.push({ tile: e, color: 0xef4444 })
-        }
-        this.board.setSensed(sensed)
-        this.board.setFog(fog)
-    }
-
-    private fogTiles(): Tile[] | null {
-        let visible: Tile[] | null = null
-        for (const a of this.abilities) {
-            const tiles = a.visibleTiles()
-            if (tiles) visible = [...(visible ?? []), ...tiles]
-        }
-        return visible
     }
 
     // ---------- Highlights and forecast ----------
@@ -576,7 +614,8 @@ export class Battle {
 
     private refreshHighlights() {
         this.preview.stop()
-        this.syncView()
+        this.perception.syncView()
+        this.refreshDoorStates()
         this.board.clearHighlight("main")
         this.board.clearHighlight("preview")
         this.board.clearArrows()
@@ -585,12 +624,16 @@ export class Battle {
         if (this.phase !== "player") return
 
         const action = this.selectedAction
-        if (action) {
+        if (action && isSelfAction(action)) {
+            // Green = click yourself
+            this.board.highlight("main", [this.player], 0x22c55e, 0.55)
+        } else if (action) {
             // Red = can hit. Grey = in range but a wall is in the way.
             const { clear, blocked } = this.board.attackRange(
                 this.player,
                 action.minRange,
                 action.maxRange,
+                action.needsSight !== false,
             )
             this.board.highlight("main", clear, 0xef4444)
             this.board.addHighlight("main", blocked, 0x64748b, 0.5)
@@ -612,7 +655,7 @@ export class Battle {
         // Eyes closed with an active ability: replay the coming turn
         if (this.abilities.some((a) => a.showsForecast())) {
             const zone = this.previewZone()
-            this.forecast = this.computeForecast(zone)
+            this.forecast = computeForecast(this, zone)
             this.preview.play(this.forecast, {
                 zone,
                 isEnemy: (e) => e instanceof Enemy,
@@ -638,147 +681,6 @@ export class Battle {
         )
     }
 
-    private computeForecast(zone: Set<string>): Forecast {
-        const all = this.everyone
-        const before = new Map<Entity, { tile: Tile; hp: number }>(
-            all.map((e) => [
-                e,
-                { tile: { col: e.col, row: e.row }, hp: e.stats.hp },
-            ]),
-        )
-        const restores = [
-            ...all.map((e) => e.snapshot()),
-            ...this.abilities.map((a) => a.snapshot()),
-        ]
-
-        let events: SimEvent[] = []
-        let outcomes: Outcome[] = []
-        sim.dry = true
-        sim.events = []
-        try {
-            runDry(this.enemyPhase())
-            events = sim.events
-            outcomes = all.map((e) => ({
-                entity: e,
-                name: e.displayName,
-                from: before.get(e)!.tile,
-                tile: { col: e.col, row: e.row },
-                hpBefore: before.get(e)!.hp,
-                hp: e.stats.hp,
-                maxHp: e.stats.maxHp,
-                dead: e.isDead,
-            }))
-        } finally {
-            sim.dry = false
-            sim.events = []
-            for (const restore of restores.reverse()) restore()
-        }
-        return this.buildForecast(events, outcomes, zone)
-    }
-
-    /** Group events into one step per actor. Anything outside the zone is left out of the steps. */
-    private buildForecast(
-        events: SimEvent[],
-        outcomes: Outcome[],
-        zone: Set<string>,
-    ): Forecast {
-        const inZ = (t: Tile) => zone.has(tileKey(t))
-        const isSeen = (ev: SimEvent) => {
-            switch (ev.kind) {
-                case "move":
-                    return inZ(ev.from) || ev.path.some(inZ)
-                case "attack":
-                case "push":
-                    return inZ(ev.from) || inZ(ev.to)
-                case "idle":
-                    return inZ(ev.at)
-                case "heal":
-                    return false
-                default:
-                    return true
-            }
-        }
-
-        const steps: ForecastStep[] = []
-        const notes: string[] = []
-        const playback: PlaybackItem[] = []
-        let lastAttack: ForecastAttack | null = null
-        let killSeen = false
-        let ended: boolean | undefined
-
-        const stepFor = (actor: Entity, start: Tile) => {
-            const last = steps[steps.length - 1]
-            if (last && last.actor === actor) return last
-            const step: ForecastStep = {
-                actor,
-                name: actor.displayName,
-                team: actor instanceof Enemy ? "enemy" : "ally",
-                start,
-                path: [],
-                attacks: [],
-            }
-            steps.push(step)
-            return step
-        }
-
-        for (const ev of events) {
-            let index = -1
-            if (isSeen(ev)) {
-                switch (ev.kind) {
-                    case "move": {
-                        const start = inZ(ev.from)
-                            ? ev.from
-                            : ev.path.find(inZ)!
-                        const step = stepFor(ev.actor, start)
-                        step.path = ev.path.filter(inZ)
-                        index = steps.indexOf(step)
-                        break
-                    }
-                    case "attack": {
-                        const step = stepFor(ev.actor, ev.from)
-                        lastAttack = {
-                            from: ev.from,
-                            to: ev.to,
-                            damage: ev.damage,
-                            kills: ev.kills,
-                            target: ev.target,
-                        }
-                        if (ev.kills) killSeen = true
-                        step.attacks.push(lastAttack)
-                        index = steps.indexOf(step)
-                        break
-                    }
-                    case "push":
-                        if (lastAttack && lastAttack.target === ev.target) {
-                            lastAttack.pushTo = ev.to
-                            lastAttack.breaks = ev.breaks
-                        }
-                        break
-                    case "idle": {
-                        const step = stepFor(ev.actor, ev.at)
-                        step.idle = ev.reason
-                        index = steps.indexOf(step)
-                        break
-                    }
-                    case "note":
-                        notes.push(ev.text)
-                        break
-                    case "end":
-                        ended = ev.won
-                        break
-                }
-            }
-            playback.push({ ev, step: index })
-        }
-
-        // A victory is only known if you saw the killing blow
-        let result: Forecast["result"]
-        if (ended === false) result = "lost"
-        else if (ended === true && killSeen) result = "won"
-
-        return { steps, notes, outcomes, playback, result }
-    }
-
     // ---------- Helpers ----------
 
     private reachableTiles(from: Tile, ap: number, forPlayer: boolean) {
@@ -788,33 +690,13 @@ export class Battle {
                   ap,
                   this.isBlockedForPlayer,
                   (t) => !this.entityAt(t),
+                  true,
               )
             : this.board.getReachable(from, ap, (t) => this.isOccupied(t))
         return Array.from(found.values()).filter((n) => n.dist > 0)
     }
 
-    /** Who this enemy believes it is fighting, or null if it can't find anyone */
-    private targetFor(enemy: Entity): Entity | null {
-        for (const a of this.abilities) {
-            const target = a.perceivedTarget(enemy)
-            if (target) return target
-        }
-        return this.canPerceivePlayer(enemy) ? this.player : null
-    }
-
-    /** Zetsu hides you, unless the enemy has a clear line of sight or senses you with En */
-    private canPerceivePlayer(enemy: Entity) {
-        if (!this.player.hasStatus(ZETSU)) return true
-        if (
-            enemy.senseRadius > 0 &&
-            manhattan(enemy, this.player) <= enemy.senseRadius
-        ) {
-            return true
-        }
-        return this.board.hasLineOfSight(enemy, this.player)
-    }
-
-    private get everyone(): Entity[] {
+    public get everyone(): Entity[] {
         if (!this.player) return []
         return [
             this.player,
@@ -835,12 +717,65 @@ export class Battle {
         )
     }
 
+    /** Whether an enemy would notice the player standing at a specific tile. */
+    public canPerceivePlayer(enemy: Entity, at?: Tile) {
+        return this.perception.canPerceivePlayer(enemy, at)
+    }
+
+    /** Knocked-out entities still take up their tile */
     public isOccupied(tile: Tile) {
         return this.everyone.some(
             (e) => !e.isDead && e.col === tile.col && e.row === tile.row,
         )
     }
 
-    /** Only enemies stop the player from walking through (the clone is an illusion) */
-    private isBlockedForPlayer = (tile: Tile) => this.hasEnemyAt(tile)
+    /** Enemies and locked exits stop the player; the clone remains passable. */
+    private isBlockedForPlayer = (tile: Tile) => {
+        if (this.hasEnemyAt(tile)) return true
+        const exit = this.board.doorAt(tile)
+        return !!exit && !!this.doorReason(exit)
+    }
+
+    /** Why an exit is locked, or null when it can be used. */
+    private doorReason(exit: ExitDef) {
+        const at = this.board.doorTile(exit)
+        return (
+            exit.requires
+                ?.map((condition) => condition(this, at))
+                .find(Boolean) ?? null
+        )
+    }
+
+    private refreshDoorStates() {
+        const states = new Map<string, string | null>()
+        for (const exit of this.board.doors)
+            states.set(exit.id, this.doorReason(exit))
+        this.board.setDoorStates(states)
+    }
+
+    private async changeMap(exit: ExitDef) {
+        const map: MapDef | undefined = MAPS[exit.to.map]
+        const entry = map?.exits.find((candidate) => candidate.id === exit.to.exit)
+        if (!map || !entry) {
+            this.say("That exit has no destination")
+            return
+        }
+
+        for (const ability of this.abilities) ability.onMapChange()
+        for (const enemy of this.enemies) enemy.destroy()
+
+        this.selectedAction = null
+        this.currentMapId = exit.to.map
+        this.board.load(map)
+        await this.player.slide([this.board.innerTile(entry)])
+        this.enemies = map.enemies.map(
+            (spawn) => new Enemy(this.board, spawn.col, spawn.row, spawn.type),
+        )
+        for (const enemy of this.enemies)
+            this.board.entityLayer.addChild(enemy)
+
+        combatLog.add(`You enter ${map.name}`, 0x94a3b8)
+        this.inspected = null
+        this.refreshHighlights()
+    }
 }

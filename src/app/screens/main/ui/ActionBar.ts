@@ -1,12 +1,15 @@
 import { Container, Graphics, Text } from "pixi.js"
 import { ActionCard, CARD_H, CARD_W } from "./ActionCard"
 import type { Action } from "../core/Actions"
-import { describeAction, groupColor } from "../core/Actions"
+import { describeAction, groupColor, isSelfAction } from "../core/Actions"
 import type { Battle } from "../Battle"
 
-const GAP = 8
-const TAB_H = 28
+const GAP = 6
+const TAB_H = 26
 const MARGIN = 15
+/** More visible cards than this and the bar splits into tabs by group */
+const TAB_THRESHOLD = 16
+const EYES_ACTIONS = new Set(["close-eyes", "open-eyes"])
 
 interface Tab {
     group: string
@@ -23,15 +26,17 @@ export class ActionBar extends Container {
     private tabLayer = new Container()
     private cardLayer = new Container()
     private tip = new Container()
-    /** Actions of the open tab, in hotkey order */
+    /** Visible actions in reading order (hotkey order) */
     private shown: Action[] = []
     private current = ""
+    private tabbed = false
     private hovered: Action | null = null
 
     private viewW = 0
     private viewH = 0
     private reserved = 0
     private contentW = 0
+    private contentH = 0
     private tabsW = 0
 
     constructor(battle: Battle) {
@@ -55,11 +60,10 @@ export class ActionBar extends Container {
         }
 
         this.current = this.tabs[0]?.group ?? ""
-        this.cardLayer.y = TAB_H + 8
         this.addChild(this.tabLayer, this.cardLayer, this.tip)
     }
 
-    /** Hotkey: 1 = first card of the open tab */
+    /** Hotkey: 1 = first visible card */
     public press(n: number) {
         const action = this.shown[n - 1]
         if (action) this.battle.selectAction(action)
@@ -70,26 +74,27 @@ export class ActionBar extends Container {
         const myTurn = b.phase === "player"
         const groupOf = (a: Action) => a.group ?? "Combat"
 
-        // Tabs that currently have something to show
-        const open = this.tabs.filter((t) =>
-            [...this.cards.keys()].some(
-                (a) => groupOf(a) === t.group && b.isVisible(a),
-            ),
+        const visible = [...this.cards.keys()].filter((a) => b.isVisible(a))
+        this.tabbed = visible.length > TAB_THRESHOLD
+
+        // Tabs only exist when there are too many cards for two rows
+        const groups = this.tabs.filter((t) =>
+            visible.some((a) => groupOf(a) === t.group),
         )
-        if (!open.some((t) => t.group === this.current))
-            this.current = open[0]?.group ?? ""
+        if (!groups.some((t) => t.group === this.current))
+            this.current = groups[0]?.group ?? ""
 
         let tx = 0
         for (const tab of this.tabs) {
-            const isOpen = open.includes(tab)
-            tab.box.visible = isOpen
-            if (!isOpen) continue
+            const open = this.tabbed && groups.includes(tab)
+            tab.box.visible = open
+            if (!open) continue
 
             const active = tab.group === this.current
             const color = groupColor(tab.group)
             tab.bg
                 .clear()
-                .roundRect(0, 0, tab.width, TAB_H, 14)
+                .roundRect(0, 0, tab.width, TAB_H, 13)
                 .fill({
                     color: active ? color : 0x0f172a,
                     alpha: active ? 0.9 : 0.85,
@@ -101,24 +106,46 @@ export class ActionBar extends Container {
         }
         this.tabsW = Math.max(0, tx - 6)
 
-        // Cards of the open tab
-        this.shown = []
-        let x = 0
+        // Cards: row by row, two rows
+        const shown = this.tabbed
+            ? visible.filter((a) => groupOf(a) === this.current)
+            : visible
+        const mainRow = shown.filter(
+            (a) => groupOf(a) !== "Nen" && !EYES_ACTIONS.has(a.id),
+        )
+        const eyes = shown.filter((a) => EYES_ACTIONS.has(a.id))
+        const nenRow = shown.filter((a) => groupOf(a) === "Nen")
+        const topRow = [...mainRow, ...eyes]
+        this.shown = [...topRow, ...nenRow]
+        this.cardLayer.y = this.tabbed ? TAB_H + 6 : 0
+
+        const positions = new Map<Action, { x: number; y: number }>()
+        topRow.forEach((action, i) =>
+            positions.set(action, { x: i * (CARD_W + GAP), y: 0 }),
+        )
+        const secondRowY = topRow.length > 0 ? CARD_H + GAP : 0
+        nenRow.forEach((action, i) =>
+            positions.set(action, {
+                x: i * (CARD_W + GAP),
+                y: secondRowY,
+            }),
+        )
+
         for (const [action, card] of this.cards) {
-            const show = groupOf(action) === this.current && b.isVisible(action)
-            card.visible = show
-            if (!show) continue
+            const i = this.shown.indexOf(action)
+            card.visible = i >= 0
+            if (i < 0) continue
 
-            card.x = x
-            x += CARD_W + GAP
-            this.shown.push(action)
-            card.setHotkey(this.shown.length <= 9 ? `${this.shown.length}` : "")
-
-            const on = action.kind === "instant" && !!action.isOn?.()
-            card.setSelected(b.selectedAction === action || on)
+            const position = positions.get(action)!
+            card.position.set(position.x, position.y)
+            card.setHotkey(i < 9 ? `${i + 1}` : "")
+            card.setSelected(b.selectedAction === action || !!action.isOn?.())
             card.setEnabled(myTurn && !b.unusableReason(action))
         }
-        this.contentW = Math.max(0, x - GAP)
+        const columns = Math.max(topRow.length, nenRow.length)
+        const rows = Number(topRow.length > 0) + Number(nenRow.length > 0)
+        this.contentW = Math.max(0, columns * (CARD_W + GAP) - GAP)
+        this.contentH = rows * CARD_H + Math.max(0, rows - 1) * GAP
 
         this.place()
         this.updateTip()
@@ -135,21 +162,22 @@ export class ActionBar extends Container {
     private place() {
         if (this.viewW === 0) return
         const w = Math.max(1, this.contentW, this.tabsW)
+        const h = (this.tabbed ? TAB_H + 6 : 0) + this.contentH
         const scale = Math.max(
-            0.4,
+            0.5,
             Math.min(1, (this.viewW - this.reserved) / w),
         )
         this.scale.set(scale)
         this.x = (this.viewW - w * scale) / 2
-        this.y = this.viewH - (TAB_H + 8 + CARD_H) * scale - MARGIN
+        this.y = this.viewH - h * scale - MARGIN
     }
 
     private makeTab(group: string): Tab {
         const caption = new Text({
             text: group,
-            style: { fill: 0xffffff, fontSize: 13, fontWeight: "bold" },
+            style: { fill: 0xffffff, fontSize: 12, fontWeight: "bold" },
         })
-        caption.position.set(14, 6)
+        caption.position.set(13, 5)
 
         const bg = new Graphics()
         const box = new Container()
@@ -161,7 +189,7 @@ export class ActionBar extends Container {
             this.refresh()
         })
         this.tabLayer.addChild(box)
-        return { group, box, bg, caption, width: caption.width + 28 }
+        return { group, box, bg, caption, width: caption.width + 26 }
     }
 
     private updateTip() {
@@ -178,20 +206,29 @@ export class ActionBar extends Container {
         const b = this.battle
         const reason = b.phase === "player" ? b.unusableReason(action) : null
 
-        const title = new Text({
-            text: `${action.name}   ${action.apCost} AP`,
-            style: { fill: 0xffffff, fontSize: 15, fontWeight: "bold" },
-        })
-        const body = new Text({
-            text: describeAction(action),
-            style: {
-                fill: 0xcbd5e1,
-                fontSize: 13,
-                wordWrap: true,
-                wordWrapWidth: 260,
-            },
-        })
-        const nodes: Text[] = [title, body]
+        const nodes: Text[] = [
+            new Text({
+                text: `${action.name}   ${action.apCost} AP`,
+                style: { fill: 0xffffff, fontSize: 15, fontWeight: "bold" },
+            }),
+            new Text({
+                text: describeAction(action),
+                style: {
+                    fill: 0xcbd5e1,
+                    fontSize: 13,
+                    wordWrap: true,
+                    wordWrapWidth: 260,
+                },
+            }),
+        ]
+        if (isSelfAction(action)) {
+            nodes.push(
+                new Text({
+                    text: "Select it, then click yourself",
+                    style: { fill: 0x86efac, fontSize: 12 },
+                }),
+            )
+        }
         if (reason) {
             nodes.push(
                 new Text({
@@ -215,8 +252,9 @@ export class ActionBar extends Container {
             .stroke({ width: 2, color: groupColor(action.group) })
 
         this.tip.addChild(bg, ...nodes)
+        const cardX = this.cardLayer.x + card.x
         this.tip.x = Math.min(
-            card.x,
+            cardX,
             Math.max(0, Math.max(this.contentW, this.tabsW) - w),
         )
         this.tip.y = -h - 6

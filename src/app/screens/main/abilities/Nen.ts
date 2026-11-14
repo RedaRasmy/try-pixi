@@ -44,6 +44,9 @@ export function makeStatus(id: string, permanent = false): Status {
     return status
 }
 
+/** Select the card, then click yourself */
+const SELF = { minRange: 0, maxRange: 0 } as const
+
 export class Nen extends BaseAbility {
     constructor(private battle: Battle) {
         super()
@@ -52,14 +55,15 @@ export class Nen extends BaseAbility {
 
         this.actions = [
             {
-                kind: "instant",
+                ...SELF,
                 id: "zetsu-on",
                 name: "Zetsu",
                 group: "Nen",
                 subtitle: "hide, takes x1.5",
                 description:
-                    "Hide your presence. Enemies without line of sight (or En) lose track of you. You take x1.5 damage. Seals Ten, Ren, Ko and En. Required for Laplace Demon.",
+                    "Hide your presence: enemies without line of sight (or En) lose track of you. You take x1.5 damage. Seals Ten, Ren, Ko and En. Together with closed eyes it starts Laplace Demon.",
                 apCost: 3,
+                blind: true,
                 forbidsStatus: ZETSU,
                 run: () => {
                     for (const id of [TEN, REN, KO, EN]) this.remove(id)
@@ -68,13 +72,14 @@ export class Nen extends BaseAbility {
                 },
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "zetsu-off",
                 name: "Zetsu Off",
                 group: "Nen",
                 subtitle: "release",
                 description: "Stop hiding. Ends Laplace Demon if it is active.",
                 apCost: 1,
+                blind: true,
                 requiresStatus: ZETSU,
                 run: () => {
                     this.remove(ZETSU)
@@ -82,33 +87,33 @@ export class Nen extends BaseAbility {
                 },
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "ten",
                 name: "Ten",
                 group: "Nen",
                 subtitle: "takes x0.7",
                 description:
-                    "Wrap yourself in aura. You take x0.7 damage for 3 turns.",
+                    "Wrap yourself in aura: you take x0.7 damage for 3 turns.",
                 apCost: 1,
                 forbidsStatus: TEN,
                 unavailable: sealed,
                 run: () => this.give(TEN),
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "ren",
                 name: "Ren",
                 group: "Nen",
                 subtitle: "deals x1.5",
                 description:
-                    "Amplify your aura. You deal x1.5 damage for 2 turns.",
+                    "Amplify your aura: you deal x1.5 damage for 2 turns.",
                 apCost: 2,
                 forbidsStatus: REN,
                 unavailable: sealed,
                 run: () => this.give(REN),
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "ko",
                 name: "Ko",
                 group: "Nen",
@@ -121,33 +126,30 @@ export class Nen extends BaseAbility {
                 run: () => this.give(KO),
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "en",
                 name: "En",
                 group: "Nen",
                 subtitle: `sense ${EN_RADIUS} tiles`,
-                description: `Extend your aura ${EN_RADIUS} tiles. You see everything inside it, even through walls, Zetsu users and with your eyes closed. It cannot reveal the real body of a Laplace caster.`,
+                description: `Extend your aura ${EN_RADIUS} tiles: you see everything inside it, even through walls, Zetsu users and with closed eyes. It cannot reveal the real body of a Laplace caster.`,
                 apCost: 2,
                 forbidsStatus: EN,
                 unavailable: sealed,
                 run: () => this.give(EN),
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "close-eyes",
                 name: "Close Eyes",
                 group: "Senses",
                 subtitle: "dark / preview",
-                description: `The board goes dark. You still feel creatures within ${EYES_SENSE} tiles (not Zetsu users) and everything inside your En. With Zetsu and enough charge this starts Laplace Demon and shows the full preview of the coming turn. Eyes stay closed until you open them.`,
+                description: `The board goes dark. You still feel creatures within ${EYES_SENSE} tiles (not Zetsu users) and everything inside your En. With Zetsu on (and enough charge) it starts Laplace Demon and replays the coming turn.`,
                 apCost: 1,
                 forbidsStatus: EYES,
-                run: () => {
-                    this.give(EYES)
-                    for (const a of this.battle.abilities) a.onEyesClosed()
-                },
+                run: () => this.give(EYES),
             },
             {
-                kind: "instant",
+                ...SELF,
                 id: "open-eyes",
                 name: "Open Eyes",
                 group: "Senses",
@@ -155,6 +157,7 @@ export class Nen extends BaseAbility {
                 description:
                     "Open your eyes. The preview disappears, the ability stays active.",
                 apCost: 1,
+                blind: true,
                 requiresStatus: EYES,
                 run: () => this.remove(EYES),
             },
@@ -167,10 +170,9 @@ export class Nen extends BaseAbility {
         return this.has(EYES) ? "Your eyes are closed" : null
     }
 
+    /** With closed eyes only `blind` actions work */
     public override blocksAction(action: Action) {
-        return this.has(EYES) && action.id !== "open-eyes"
-            ? "Your eyes are closed"
-            : null
+        return this.has(EYES) && !action.blind ? "Your eyes are closed" : null
     }
 
     /** Eyes closed = darkness, except the tiles your En can feel */
@@ -181,8 +183,6 @@ export class Nen extends BaseAbility {
             ? this.battle.board.tilesInRange(p, 0, p.senseRadius, true)
             : []
     }
-
-    // ---------- Helpers ----------
 
     private has(id: string) {
         return this.battle.player.hasStatus(id)

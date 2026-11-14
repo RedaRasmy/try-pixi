@@ -1,5 +1,12 @@
 import { Container, Graphics, Polygon, Text } from "pixi.js"
+import type { ExitDef, MapDef, Side } from "../data/Maps"
 
+const SIDE_OUT: Record<Side, { x: number; y: number }> = {
+    nw: { x: -1, y: -0.5 },
+    ne: { x: 1, y: -0.5 },
+    se: { x: 1, y: 0.5 },
+    sw: { x: -1, y: 0.5 },
+}
 export const TILE_W = 128
 export const TILE_H = 64
 const WALL_H = 30
@@ -57,8 +64,13 @@ const offset = (points: number[], x: number, y: number) =>
     points.map((v, i) => (i % 2 === 0 ? v + x : v + y))
 
 export class Board extends Container {
-    public readonly cols: number
-    public readonly rows: number
+    public cols = 0
+    public rows = 0
+    public doors: ExitDef[] = []
+
+    private doorLayer = new Container()
+    private tileViews: Graphics[] = []
+    private wallViews: Graphics[] = []
 
     public onTileTap?: (tile: Tile) => void
     public onTileHover?: (tile: Tile | null) => void
@@ -80,17 +92,8 @@ export class Board extends Container {
     private fogLayer = new Container()
     private flashLayer = new Container()
 
-    /** @param layout one string per row: '.' floor, '#' wall */
-    constructor(layout: string[]) {
+    constructor() {
         super()
-        this.rows = layout.length
-        this.cols = layout[0].length
-
-        layout.forEach((line, row) => {
-            for (let col = 0; col < this.cols; col++) {
-                if (line[col] === "#") this.walls.add(tileKey({ col, row }))
-            }
-        })
 
         this.labelLayer.eventMode = "none"
         this.entityLayer.sortableChildren = true
@@ -99,12 +102,14 @@ export class Board extends Container {
         this.fogLayer.eventMode = "none"
         this.senseLayer.eventMode = "none"
         this.flashLayer.eventMode = "none"
+        this.doorLayer.eventMode = "none"
         for (const layer of Object.values(this.highlightLayers)) {
             layer.eventMode = "none"
         }
 
         this.addChild(
             this.tileLayer,
+            this.doorLayer,
             this.highlightLayers.zone,
             this.highlightLayers.main,
             this.highlightLayers.preview,
@@ -146,48 +151,53 @@ export class Board extends Container {
         this.senseLayer.addChild(g)
     }
 
-    /** Is there a clear straight line between two tiles (no wall in between)? */
+    /** Only walls block sight. Symmetric: sight(a, b) is always sight(b, a). */
     public hasLineOfSight(a: Tile, b: Tile) {
-        return this.rayClear(a, b) && this.rayClear(b, a)
-    }
-
-    /** In range and no wall in between */
-    public canHit(
-        from: Tile,
-        to: Tile,
-        range: { minRange: number; maxRange: number },
-    ) {
-        const d = manhattan(from, to)
-        return (
-            d >= range.minRange &&
-            d <= range.maxRange &&
-            this.hasLineOfSight(from, to)
-        )
-    }
-
-    private rayClear(a: Tile, b: Tile) {
+        // Always walk the line in the same direction, so both ends get the same answer
+        const [p, q] =
+            a.col < b.col || (a.col === b.col && a.row <= b.row)
+                ? [a, b]
+                : [b, a]
         const steps =
-            Math.max(Math.abs(b.col - a.col), Math.abs(b.row - a.row)) * 2
+            Math.max(Math.abs(q.col - p.col), Math.abs(q.row - p.row)) * 4
+
         for (let i = 1; i < steps; i++) {
             const t = i / steps
-            const tile = {
-                col: Math.round(a.col + (b.col - a.col) * t),
-                row: Math.round(a.row + (b.row - a.row) * t),
-            }
+            const col = Math.floor(p.col + (q.col - p.col) * t + 0.5 + 1e-9)
+            const row = Math.floor(p.row + (q.row - p.row) * t + 0.5 + 1e-9)
             const isEnd =
-                (tile.col === a.col && tile.row === a.row) ||
-                (tile.col === b.col && tile.row === b.row)
-            if (!isEnd && this.isWall(tile)) return false
+                (col === p.col && row === p.row) ||
+                (col === q.col && row === q.row)
+            if (!isEnd && this.isWall({ col, row })) return false
         }
         return true
     }
 
+    /** In range, and (unless `needsSight` is false) no wall in between */
+    public canHit(
+        from: Tile,
+        to: Tile,
+        range: { minRange: number; maxRange: number; needsSight?: boolean },
+    ) {
+        const d = manhattan(from, to)
+        if (d < range.minRange || d > range.maxRange) return false
+        return range.needsSight === false || this.hasLineOfSight(from, to)
+    }
+
     /** Tiles in range, split into those you can hit and those hidden behind walls */
-    public attackRange(from: Tile, min: number, max: number) {
+    public attackRange(
+        from: Tile,
+        min: number,
+        max: number,
+        needsSight = true,
+    ) {
         const clear: Tile[] = []
         const blocked: Tile[] = []
         for (const t of this.tilesInRange(from, min, max)) {
-            ;(this.hasLineOfSight(from, t) ? clear : blocked).push(t)
+            ;(!needsSight || this.hasLineOfSight(from, t)
+                ? clear
+                : blocked
+            ).push(t)
         }
         return { clear, blocked }
     }
@@ -234,6 +244,7 @@ export class Board extends Container {
         maxSteps: number,
         isBlocked: (tile: Tile) => boolean,
         canStop: (tile: Tile) => boolean = () => true,
+        allowDoors = false,
     ) {
         const start: PathNode = {
             col: from.col,
@@ -251,8 +262,10 @@ export class Board extends Container {
 
             for (const [dc, dr] of NEIGHBOURS) {
                 const next = { col: current.col + dc, row: current.row + dr }
-                if (!this.isInside(next.col, next.row) || this.isWall(next))
-                    continue
+                const isDoor = !this.isInside(next.col, next.row)
+                if (isDoor && !(allowDoors && this.doorAt(next))) continue
+                if (!isDoor && this.isWall(next)) continue
+
                 const key = tileKey(next)
                 if (seen.has(key) || isBlocked(next)) continue
                 seen.add(key)
@@ -263,7 +276,7 @@ export class Board extends Container {
                     parent: current,
                 }
                 if (canStop(next)) found.set(key, node)
-                queue.push(node)
+                if (!isDoor) queue.push(node)
             }
         }
         return found
@@ -456,39 +469,71 @@ export class Board extends Container {
 
     // ---------- Building ----------
 
+    /** Replace the current map. Entities are not touched (the Battle handles them). */
+    public load(map: MapDef) {
+        for (const v of this.tileViews) v.destroy()
+        for (const v of this.wallViews) v.destroy()
+        this.tileViews = []
+        this.wallViews = []
+        this.walls.clear()
+        for (const c of this.doorLayer.removeChildren()) c.destroy()
+        for (const layer of Object.keys(
+            this.highlightLayers,
+        ) as HighlightLayer[]) {
+            this.clearHighlight(layer)
+        }
+        this.clearArrows()
+        this.setFog(null)
+        this.setSensed([])
+
+        this.rows = map.layout.length
+        this.cols = map.layout[0].length
+        this.doors = map.exits
+        map.layout.forEach((line, row) => {
+            for (let col = 0; col < this.cols; col++) {
+                if (line[col] === "#") this.walls.add(tileKey({ col, row }))
+            }
+        })
+        this.build()
+    }
+
     private build() {
         for (let row = 0; row < this.rows; row++) {
             for (let col = 0; col < this.cols; col++) {
-                const wall = this.isWall({ col, row })
                 const color = (col + row) % 2 === 0 ? 0xe8e8e8 : 0xbfbfbf
-
-                const tile = new Graphics()
-                    .poly(DIAMOND)
-                    .fill(color)
-                    .stroke({ width: 2, color: 0x000000, alpha: 0.3 })
-
-                const pos = this.gridToScreen(col, row)
-                tile.position.set(pos.x, pos.y)
-
-                tile.hitArea = new Polygon(DIAMOND)
-                tile.eventMode = "static"
-                tile.cursor = wall ? "default" : "pointer"
-                tile.on("pointerover", () => {
-                    if (!wall) tile.tint = 0xffd966
-                    this.onTileHover?.({ col, row })
-                })
-                tile.on("pointerout", () => {
-                    tile.tint = 0xffffff
-                    this.onTileHover?.(null)
-                })
-                tile.on("pointertap", () => this.onTileTap?.({ col, row }))
-                this.tileLayer.addChild(tile)
-
-                if (wall) this.buildWall(col, row)
+                this.addTile({ col, row }, color)
+                if (this.isWall({ col, row })) this.buildWall(col, row)
             }
         }
+        // Door tiles sit just outside the grid
+        for (const d of this.doors) this.addTile(this.doorTile(d), 0x1e293b)
 
         this.y = -((this.cols + this.rows - 2) * TILE_H) / 4
+    }
+
+    private addTile(t: Tile, color: number) {
+        const wall = this.isWall(t)
+        const tile = new Graphics()
+            .poly(DIAMOND)
+            .fill(color)
+            .stroke({ width: 2, color: 0x000000, alpha: 0.3 })
+
+        const pos = this.gridToScreen(t.col, t.row)
+        tile.position.set(pos.x, pos.y)
+        tile.hitArea = new Polygon(DIAMOND)
+        tile.eventMode = "static"
+        tile.cursor = wall ? "default" : "pointer"
+        tile.on("pointerover", () => {
+            if (!wall) tile.tint = 0xffd966
+            this.onTileHover?.(t)
+        })
+        tile.on("pointerout", () => {
+            tile.tint = 0xffffff
+            this.onTileHover?.(null)
+        })
+        tile.on("pointertap", () => this.onTileTap?.(t))
+        this.tileLayer.addChild(tile)
+        this.tileViews.push(tile)
     }
 
     /** An isometric block: left face, right face and top */
@@ -510,5 +555,79 @@ export class Board extends Container {
         wall.position.set(pos.x, pos.y)
         wall.zIndex = col + row
         this.entityLayer.addChild(wall)
+        this.wallViews.push(wall)
+    }
+
+    public doorTile(d: ExitDef): Tile {
+        switch (d.side) {
+            case "nw":
+                return { col: -1, row: d.at }
+            case "ne":
+                return { col: d.at, row: -1 }
+            case "se":
+                return { col: this.cols, row: d.at }
+            case "sw":
+                return { col: d.at, row: this.rows }
+        }
+    }
+
+    /** The floor tile right next to the door (where you arrive) */
+    public innerTile(d: ExitDef): Tile {
+        switch (d.side) {
+            case "nw":
+                return { col: 0, row: d.at }
+            case "ne":
+                return { col: d.at, row: 0 }
+            case "se":
+                return { col: this.cols - 1, row: d.at }
+            case "sw":
+                return { col: d.at, row: this.rows - 1 }
+        }
+    }
+
+    public doorAt(t: Tile) {
+        return this.doors.find((d) => {
+            const p = this.doorTile(d)
+            return p.col === t.col && p.row === t.row
+        })
+    }
+
+    /** reason = locked. Draws every door green (open) or red with an X (locked). */
+    public setDoorStates(states: Map<string, string | null>) {
+        for (const c of this.doorLayer.removeChildren()) c.destroy()
+        for (const d of this.doors) {
+            const locked = !!states.get(d.id)
+            const color = locked ? 0xdc2626 : 0x22c55e
+            const out = SIDE_OUT[d.side]
+            const n = { x: -out.y, y: out.x }
+            const base = { x: out.x * 2, y: out.y * 2 }
+
+            const g = new Graphics()
+                .poly(DIAMOND)
+                .fill({ color, alpha: 0.5 })
+                .stroke({ width: 3, color, alpha: 0.95 })
+            if (locked) {
+                g.moveTo(-14, -7).lineTo(14, 7).moveTo(-14, 7).lineTo(14, -7)
+                g.stroke({
+                    width: 4,
+                    color: 0xffffff,
+                    alpha: 0.9,
+                    cap: "round",
+                })
+            } else {
+                g.poly([
+                    out.x * 30,
+                    out.y * 30,
+                    base.x + n.x * 14,
+                    base.y + n.y * 14,
+                    base.x - n.x * 14,
+                    base.y - n.y * 14,
+                ]).fill({ color: 0xffffff, alpha: 0.95 })
+            }
+            const p = this.doorTile(d)
+            const pos = this.gridToScreen(p.col, p.row)
+            g.position.set(pos.x, pos.y)
+            this.doorLayer.addChild(g)
+        }
     }
 }

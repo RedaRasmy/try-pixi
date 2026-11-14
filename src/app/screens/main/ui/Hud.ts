@@ -1,7 +1,7 @@
 import { animate } from "motion"
 import { Container, Graphics, Text } from "pixi.js"
 import type { DestroyOptions } from "pixi.js"
-
+import { LogPanel } from "./LogPanel"
 import { ActionBar } from "./ActionBar"
 import type { Battle } from "../Battle"
 import { EndTurnButton } from "./EndTurnButton"
@@ -29,6 +29,8 @@ export class Hud extends Container {
 
     private viewW = 0
     private viewH = 0
+
+    private log = new LogPanel()
 
     constructor(battle: Battle) {
         super()
@@ -61,6 +63,7 @@ export class Hud extends Container {
             this.statusBar,
             this.turnBanner,
             this.timeline,
+            this.log,
             this.toast,
             this.actionBar,
             this.endTurn,
@@ -137,9 +140,13 @@ export class Hud extends Container {
             shown,
             shown === b.player ? b.abilities.flatMap((a) => a.resources) : [],
         )
+
         this.timeline.show(
             b.forecast,
-            Math.max(300, this.viewW - LEFT_PANEL - MARGIN),
+            Math.max(
+                300,
+                this.viewW - LEFT_PANEL - LogPanel.WIDTH - MARGIN * 2,
+            ),
             b.activeStep,
         )
     }
@@ -153,6 +160,7 @@ export class Hud extends Container {
         this.turnBanner.position.set(width / 2, MARGIN)
         this.toast.position.set(width / 2, MARGIN + 46)
         this.timeline.position.set(LEFT_PANEL, MARGIN + 84)
+        this.log.position.set(width - LogPanel.WIDTH - MARGIN, MARGIN)
 
         this.endTurn.position.set(
             width - EndTurnButton.WIDTH - MARGIN,
@@ -164,6 +172,7 @@ export class Hud extends Container {
             (EndTurnButton.WIDTH + MARGIN * 2) * 2,
         )
         this.gameOver.resize(width, height)
+
         this.refresh()
     }
 }

@@ -1,6 +1,7 @@
 import { animate } from "motion"
 import { Container, Graphics, Text } from "pixi.js"
 import type { Status } from "../core/Status"
+import { UNCONSCIOUS, unconsciousStatus } from "../core/Status"
 import type { Board, Tile } from "./Board"
 import type { Stats } from "../core/Stats"
 import { sim, record } from "../core/Script"
@@ -38,7 +39,10 @@ export class Entity extends Container {
         )
     }
 
-    public canHit(target: Tile, range: { minRange: number; maxRange: number }) {
+    public canHit(
+        target: Tile,
+        range: { minRange: number; maxRange: number; needsSight?: boolean },
+    ) {
         return this.board.canHit(this, target, range)
     }
 
@@ -105,8 +109,34 @@ export class Entity extends Container {
         this.drawHp()
     }
 
+    /** Knocked out by temporary damage: lies down until the ability ends */
+    public unconscious = false
+
+    /** Dead for real (hp 0 and not just knocked out) */
     public get isDead() {
-        return this.stats.hp <= 0
+        return this.stats.hp <= 0 && !this.unconscious
+    }
+
+    /** Can't act or be targeted: dead or knocked out */
+    public get isOut() {
+        return this.isDead || this.unconscious
+    }
+
+    public setUnconscious(on: boolean) {
+        this.unconscious = on
+        if (on) this.addStatus(unconsciousStatus())
+        else this.removeStatus(UNCONSCIOUS)
+        if (sim.dry) return
+        this.visual.rotation = on ? Math.PI / 2 : 0
+        this.visual.alpha = on ? 0.6 : 1
+        this.visual.tint = on ? 0x64748b : 0xffffff
+    }
+
+    public wake() {
+        if (!this.unconscious) return
+        record({ kind: "wake", target: this })
+        this.setUnconscious(false)
+        if (!sim.dry) this.showFloatingText("Awake", 0x4ade80, 24)
     }
 
     public startTurn() {
@@ -117,9 +147,11 @@ export class Entity extends Container {
         this.stats.ap = Math.max(0, this.stats.ap - amount)
     }
 
-    public async takeDamage(amount: number) {
+    /** `temporary` hits can't kill: a lethal one knocks the target out instead */
+    public async takeDamage(amount: number, temporary = false) {
         const dealt = Math.min(amount, this.stats.hp)
         this.stats.hp -= dealt
+        if (temporary && this.stats.hp <= 0) this.setUnconscious(true)
         if (sim.dry) return dealt
 
         this.drawHp()
@@ -133,6 +165,8 @@ export class Entity extends Container {
         this.visual.x = 0
 
         if (this.isDead) this.visible = false
+        else if (this.unconscious)
+            this.showFloatingText("Knocked out", 0xfbbf24, 22, 36)
         return dealt
     }
 
@@ -187,12 +221,13 @@ export class Entity extends Container {
 
     /** Save position, stats and statuses. Call the returned function to restore them. */
     public snapshot() {
-        const { col, row } = this
+        const { col, row, unconscious } = this
         const stats = { ...this.stats }
         const statuses = [...this.statuses.values()].map((s) => ({ ...s }))
         return () => {
             this.col = col
             this.row = row
+            this.unconscious = unconscious
             Object.assign(this.stats, stats)
             this.statuses.clear()
             for (const s of statuses) this.statuses.set(s.id, { ...s })

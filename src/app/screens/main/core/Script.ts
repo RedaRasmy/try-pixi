@@ -18,6 +18,8 @@ export type SimEvent =
           to: Tile
           damage: number
           kills: boolean
+          /** Temporary damage: a lethal hit knocks out instead of killing */
+          temp: boolean
       }
     | {
           kind: "push"
@@ -31,6 +33,7 @@ export type SimEvent =
     | { kind: "idle"; actor: Entity; at: Tile; reason: string }
     | { kind: "note"; text: string }
     | { kind: "end"; won: boolean }
+    | { kind: "wake"; target: Entity }
 
 /** dry = a silent simulation: no animations, no visuals, events are recorded */
 export const sim = { dry: false, events: [] as SimEvent[] }
