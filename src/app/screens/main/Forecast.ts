@@ -124,7 +124,6 @@ function buildForecast(
     const notes: string[] = []
     const playback: PlaybackItem[] = []
     let lastAttack: ForecastAttack | null = null
-    let killSeen = false
     let ended: boolean | undefined
 
     const stepFor = (actor: Entity, start: Tile) => {
@@ -163,7 +162,6 @@ function buildForecast(
                         temp: ev.temp,
                         target: ev.target,
                     }
-                    if (ev.kills && !ev.temp) killSeen = true
                     step.attacks.push(lastAttack)
                     index = steps.indexOf(step)
                     break
@@ -191,10 +189,6 @@ function buildForecast(
         playback.push({ ev, step: index })
     }
 
-    // A victory is only known if you saw the killing blow
-    let result: Forecast["result"]
-    if (ended === false) result = "lost"
-    else if (ended === true && killSeen) result = "won"
-
+    const result: Forecast["result"] = ended === false ? "lost" : undefined
     return { steps, notes, outcomes, playback, result }
 }

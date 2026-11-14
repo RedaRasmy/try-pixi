@@ -1,11 +1,12 @@
-import type { AttackAction } from "./Actions"
-import { computeDamage } from "./Actions"
+import { combatLog, logHit } from "../ui/CombatLog"
 import type { Board, PathNode, Tile } from "../world/Board"
 import { buildPath, manhattan, tileKey } from "../world/Board"
 import type { Entity } from "../world/Entity"
-import { record } from "./Script"
+
+import type { AttackAction } from "./Actions"
+import { computeDamage } from "./Actions"
 import type { Script } from "./Script"
-import { logHit } from "../ui/CombatLog"
+import { pause, record, sim } from "./Script"
 
 export interface PlannedAttack {
     target: Entity
@@ -15,6 +16,10 @@ export interface PlannedAttack {
 export interface TurnPlan {
     path: Tile[]
     attacks: PlannedAttack[]
+    /** Spend the turn refilling the magazine */
+    reload?: { apCost: number }
+    /** Walking to where the target was last seen (no attacks) */
+    searching?: boolean
 }
 
 export interface PlanHooks {
@@ -25,6 +30,7 @@ export interface PlanHooks {
     temporary?: boolean
 }
 
+/** Strongest affordable attacks in range, repeated while AP and bullets last */
 function pickAttacks(
     actions: AttackAction[],
     self: Entity,
@@ -47,11 +53,15 @@ function pickAttacks(
 
     const attacks: PlannedAttack[] = []
     let ap = apLeft
+    let ammo = self.stats.maxAmmo > 0 ? self.stats.ammo : Infinity
     for (;;) {
-        const next = usable.find((a) => a.apCost <= ap)
+        const next = usable.find(
+            (a) => a.apCost <= ap && (!a.usesAmmo || ammo > 0),
+        )
         if (!next) break
         attacks.push({ target, action: next })
         ap -= next.apCost
+        if (next.usesAmmo) ammo--
     }
     return attacks
 }
@@ -59,7 +69,6 @@ function pickAttacks(
 /**
  * Pick the reachable tile that allows the most damage. Ties go to fewer steps.
  * If no attack is possible, get as close as possible by real walking distance.
- * `canStop` lets the mover walk through some tiles without ending on them.
  */
 export function planTurn(
     board: Board,
@@ -119,12 +128,53 @@ export function planTurn(
     return { path: buildPath(best), attacks: bestAttacks }
 }
 
+/** Walk as close as possible to a tile (used when searching). No attacks. */
+export function planWalk(
+    board: Board,
+    self: Entity,
+    to: Tile,
+    isBlocked: (tile: Tile) => boolean,
+): TurnPlan {
+    const reachable = board.getReachable(self, self.stats.maxAp, isBlocked)
+    const walkTo = board.getReachable(to, 99, () => false)
+
+    let best: PathNode | null = null
+    let bestWalk = Infinity
+    for (const node of reachable.values()) {
+        const walk = walkTo.get(tileKey(node))?.dist ?? Infinity
+        if (
+            !best ||
+            walk < bestWalk ||
+            (walk === bestWalk && node.dist < best.dist)
+        ) {
+            best = node
+            bestWalk = walk
+        }
+    }
+    return { path: best ? buildPath(best) : [], attacks: [], searching: true }
+}
+
 export function* executePlan(
     self: Entity,
     plan: TurnPlan,
     hooks: PlanHooks = {},
 ): Script {
     self.startTurn()
+
+    if (plan.reload) {
+        self.spendAp(plan.reload.apCost)
+        self.stats.ammo = self.stats.maxAmmo
+        record({
+            kind: "idle",
+            actor: self,
+            at: { col: self.col, row: self.row },
+            reason: "reloads",
+        })
+        combatLog.add(`${self.displayName} reloads`, 0x94a3b8)
+        if (!sim.dry) self.showFloatingText("Reload", 0x94a3b8, 24)
+        yield* pause(500)
+    }
+
     if (plan.path.length > 0) {
         record({
             kind: "move",
@@ -141,6 +191,9 @@ export function* executePlan(
         if (!self.canHit(target, action)) break
 
         self.spendAp(action.apCost)
+        if (action.usesAmmo && self.stats.maxAmmo > 0) {
+            self.stats.ammo = Math.max(0, self.stats.ammo - 1)
+        }
         const damage = computeDamage(action, self, target)
         const dealt = Math.min(damage, target.stats.hp)
         record({

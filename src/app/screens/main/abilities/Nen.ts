@@ -10,12 +10,15 @@ export const KO = "ko"
 export const EN = "en"
 export const EYES = "closed-eyes"
 
-const EN_RADIUS = 4
+/** First En cast, then +EN_STEP per cast, up to EN_MAX */
+const EN_FIRST = 4
+const EN_STEP = 2
+const EN_MAX = 12
 /** With eyes closed you feel creatures (not Zetsu users) this close */
 export const EYES_SENSE = 4
 
 const STATUSES: Record<string, Status> = {
-    [ZETSU]: { id: ZETSU, name: "Zetsu", color: 0x43eb34, taken: 1.5 },
+    [ZETSU]: { id: ZETSU, name: "Zetsu", color: 0x43eb34, taken: 2 },
     [TEN]: { id: TEN, name: "Ten", color: 0x38bdf8, taken: 0.7, turnsLeft: 3 },
     [REN]: { id: REN, name: "Ren", color: 0xfb923c, dealt: 1.5, turnsLeft: 2 },
     [KO]: {
@@ -31,7 +34,8 @@ const STATUSES: Record<string, Status> = {
         id: EN,
         name: "En",
         color: 0xa855f7,
-        sense: EN_RADIUS,
+        taken: 1.5,
+        sense: EN_FIRST,
         turnsLeft: 3,
     },
     [EYES]: { id: EYES, name: "Closed Eyes", color: 0x64748b },
@@ -59,9 +63,9 @@ export class Nen extends BaseAbility {
                 id: "zetsu-on",
                 name: "Zetsu",
                 group: "Nen",
-                subtitle: "hide, takes x1.5",
+                subtitle: "hide, takes x2",
                 description:
-                    "Hide your presence: enemies without line of sight (or En) lose track of you. You take x1.5 damage. Seals Ten, Ren, Ko and En. Together with closed eyes it starts Laplace Demon.",
+                    "Hide your aura: En users can't sense you, but you take x2 damage. Seals Ten, Ren, Ko and En. Together with closed eyes it starts Laplace Demon.",
                 apCost: 3,
                 blind: true,
                 forbidsStatus: ZETSU,
@@ -104,9 +108,9 @@ export class Nen extends BaseAbility {
                 id: "ren",
                 name: "Ren",
                 group: "Nen",
-                subtitle: "deals x1.5",
+                subtitle: "physical x1.5",
                 description:
-                    "Amplify your aura: you deal x1.5 damage for 2 turns.",
+                    "Amplify your aura: your physical attacks (Punch, Kick) deal x1.5 for 2 turns. Bullets are not boosted.",
                 apCost: 2,
                 forbidsStatus: REN,
                 unavailable: sealed,
@@ -119,7 +123,7 @@ export class Nen extends BaseAbility {
                 group: "Nen",
                 subtitle: "next hit x3",
                 description:
-                    "Concentrate aura into one strike: your next attack deals x3, but you take x1.5 until it is spent.",
+                    "Concentrate aura into one strike: your next physical attack deals x3, but you take x1.5 until it is spent. Bullets neither benefit nor spend it.",
                 apCost: 2,
                 forbidsStatus: KO,
                 unavailable: sealed,
@@ -130,12 +134,15 @@ export class Nen extends BaseAbility {
                 id: "en",
                 name: "En",
                 group: "Nen",
-                subtitle: `sense ${EN_RADIUS} tiles`,
-                description: `Extend your aura ${EN_RADIUS} tiles: you see everything inside it, even through walls, Zetsu users and with closed eyes. It cannot reveal the real body of a Laplace caster.`,
+                subtitle: `${EN_FIRST} tiles, +${EN_STEP} per cast`,
+                description: `Extend your aura: you sense everything within ${EN_FIRST} tiles, through walls, Zetsu users and with closed eyes. Cast it again to grow the radius by ${EN_STEP} (max ${EN_MAX}) and refresh the duration. You take x1.5 damage while it is on. It cannot reveal the real body of a Laplace caster.`,
                 apCost: 2,
-                forbidsStatus: EN,
-                unavailable: sealed,
-                run: () => this.give(EN),
+                unavailable: () =>
+                    sealed() ??
+                    (this.enRadius() >= EN_MAX
+                        ? "En can't grow any further"
+                        : null),
+                run: () => this.growEn(),
             },
             {
                 ...SELF,
@@ -192,5 +199,19 @@ export class Nen extends BaseAbility {
     }
     private remove(id: string) {
         this.battle.player.removeStatus(id)
+    }
+
+    private enRadius() {
+        return this.battle.player.statuses.get(EN)?.sense ?? 0
+    }
+
+    private growEn() {
+        const radius =
+            this.enRadius() > 0 ? this.enRadius() + EN_STEP : EN_FIRST
+        this.battle.player.addStatus({
+            ...makeStatus(EN),
+            sense: radius,
+            name: `En (${radius})`,
+        })
     }
 }

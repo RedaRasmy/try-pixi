@@ -1,8 +1,8 @@
+import { EYES, EYES_SENSE, ZETSU } from "./abilities/Nen"
 import type { Battle } from "./Battle"
 import { manhattan } from "./world/Board"
 import type { Tile } from "./world/Board"
 import type { Entity } from "./world/Entity"
-import { EYES, EYES_SENSE, ZETSU } from "./abilities/Nen"
 
 /** Who sees whom: the player's view of enemies, and the enemies' view of the player */
 export class Perception {
@@ -32,10 +32,11 @@ export class Perception {
         return this.canPerceivePlayer(enemy) ? this.b.player : null
     }
 
-    /** Zetsu hides you, unless the enemy has line of sight or senses you with En */
+    /**
+     * Enemies see you only with a clear line of sight. Enemies with En feel you
+     * through walls (Zetsu doesn't help against that). `at` = where you would stand.
+     */
     public canPerceivePlayer(enemy: Entity, at: Tile = this.b.player) {
-        const p = this.b.player
-        if (!p.hasStatus(ZETSU)) return true
         if (enemy.senseRadius > 0 && manhattan(enemy, at) <= enemy.senseRadius)
             return true
         return this.b.board.hasLineOfSight(enemy, at)

@@ -597,7 +597,11 @@ export class Board extends Container {
         for (const c of this.doorLayer.removeChildren()) c.destroy()
         for (const d of this.doors) {
             const locked = !!states.get(d.id)
-            const color = locked ? 0xdc2626 : 0x22c55e
+            const color = locked
+                ? 0xdc2626
+                : d.to === "victory"
+                  ? 0xfacc15
+                  : 0x22c55e
             const out = SIDE_OUT[d.side]
             const n = { x: -out.y, y: out.x }
             const base = { x: out.x * 2, y: out.y * 2 }

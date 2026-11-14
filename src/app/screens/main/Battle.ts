@@ -1,23 +1,26 @@
+import { animate } from "motion"
+
 import type { Ability } from "./abilities/Ability"
+import { LaplaceDemon } from "./abilities/LaplaceDemon"
+import { Nen } from "./abilities/Nen"
+import { Pistol } from "./abilities/Pistol"
 import type { Action } from "./core/Actions"
 import { computeDamage, isSelfAction } from "./core/Actions"
-import type { Board, Tile } from "./world/Board"
-import { buildPath, manhattan, tileKey } from "./world/Board"
-import { combatLog, logHit } from "./ui/CombatLog"
-import { Enemy } from "./world/Enemy"
-import type { Entity } from "./world/Entity"
-import { computeForecast } from "./Forecast"
-import type { Forecast } from "./Forecast"
-import { LaplaceDemon } from "./abilities/LaplaceDemon"
-import { MAPS, START_MAP } from "./data/Maps"
-import type { ExitDef, MapDef } from "./data/Maps"
-import { Nen } from "./abilities/Nen"
-import { Perception } from "./Perception"
-import { Pistol } from "./abilities/Pistol"
-import { Player } from "./world/Player"
-import { Preview } from "./world/Preview"
 import type { Script } from "./core/Script"
 import { pause, record, runLive, sim, wait } from "./core/Script"
+import type { LevelDef } from "./data/Levels"
+import { MAPS } from "./data/Maps"
+import type { ExitDef } from "./data/Maps"
+import { computeForecast } from "./Forecast"
+import type { Forecast } from "./Forecast"
+import { Perception } from "./Perception"
+import { combatLog, logHit } from "./ui/CombatLog"
+import type { Board, Tile } from "./world/Board"
+import { buildPath, manhattan, tileKey } from "./world/Board"
+import { Enemy } from "./world/Enemy"
+import type { Entity } from "./world/Entity"
+import { Player } from "./world/Player"
+import { Preview } from "./world/Preview"
 
 export type {
     Forecast,
@@ -32,13 +35,16 @@ export type Phase = "player" | "enemy" | "busy" | "over"
 
 export class Battle {
     public readonly board: Board
-    private currentMapId = START_MAP
+    public readonly level: LevelDef
+    public mapId = ""
     public player!: Player
     public enemies: Enemy[] = []
     public abilities: Ability[] = []
 
     public phase: Phase = "player"
     public turn = 1
+    /** Enemies you killed for real (clone knockouts don't count) */
+    public defeated = 0
     public selectedAction: Action | null = null
     public inspected: Entity | null = null
     /** The simulated end of this turn (null when no preview is active) */
@@ -53,8 +59,9 @@ export class Battle {
     public readonly perception: Perception
     private preview: Preview
 
-    constructor(board: Board) {
+    constructor(board: Board, level: LevelDef) {
         this.board = board
+        this.level = level
         this.preview = new Preview(board)
         this.perception = new Perception(this)
         board.onTileTap = (tile) => void this.handleTap(tile)
@@ -70,6 +77,19 @@ export class Battle {
         ]
     }
 
+    public get stageNumber() {
+        return Math.max(1, this.level.stages.indexOf(this.mapId) + 1)
+    }
+
+    public get objective() {
+        return MAPS[this.mapId]?.objective ?? ""
+    }
+
+    /** Safe to restart or leave: nothing is animating */
+    public get canLeave() {
+        return this.phase === "player" || this.phase === "over"
+    }
+
     /** Show a short message. An empty string clears it. During a simulation it becomes a note. */
     public say(text: string) {
         if (sim.dry) {
@@ -79,25 +99,23 @@ export class Battle {
         this.onMessage?.(text)
     }
 
+    /** Stop everything before this battle is thrown away */
+    public dispose() {
+        this.preview.stop()
+        this.board.onTileTap = undefined
+        this.board.onTileHover = undefined
+        combatLog.onChange = undefined
+        this.onChange = undefined
+        this.onGameOver = undefined
+        this.onMessage = undefined
+    }
+
     public reset() {
         this.preview.stop()
         for (const a of this.abilities) a.reset()
-        if (this.player) this.player.destroy()
-        for (const e of this.enemies) e.destroy()
 
-        this.currentMapId = START_MAP
-        const map = MAPS[this.currentMapId]
-        this.board.load(map)
-        this.player = new Player(
-            this.board,
-            map.playerStart.col,
-            map.playerStart.row,
-        )
-        this.enemies = map.enemies.map(
-            (s) => new Enemy(this.board, s.col, s.row, s.type),
-        )
-        this.board.entityLayer.addChild(this.player)
-        for (const e of this.enemies) this.board.entityLayer.addChild(e)
+        this.defeated = 0
+        this.loadMap(this.level.stages[0], undefined, true)
 
         this.phase = "player"
         this.turn = 1
@@ -106,10 +124,34 @@ export class Battle {
         this.player.startTurn()
 
         combatLog.clear()
-        combatLog.add("The fight begins", 0x94a3b8)
+        combatLog.add(`${this.level.name}: ${MAPS[this.mapId].name}`, 0x94a3b8)
         this.board.clearHighlight("hover")
         this.refreshHighlights()
         this.onChange?.()
+    }
+
+    /** Build a map. `arrival` = the exit you come through (default: the map's start tile). */
+    private loadMap(mapId: string, arrival?: ExitDef, fresh = false) {
+        const map = MAPS[mapId]
+        for (const e of this.enemies) e.destroy()
+
+        this.mapId = mapId
+        this.board.alpha = 1
+        this.board.load(map)
+
+        const start = arrival ? this.board.innerTile(arrival) : map.playerStart
+        if (fresh) {
+            if (this.player) this.player.destroy()
+            this.player = new Player(this.board, start.col, start.row)
+            this.board.entityLayer.addChild(this.player)
+        } else {
+            this.player.place(start)
+        }
+
+        this.enemies = map.enemies.map(
+            (s) => new Enemy(this.board, s.col, s.row, s.type),
+        )
+        for (const e of this.enemies) this.board.entityLayer.addChild(e)
     }
 
     // ---------- Actions ----------
@@ -205,22 +247,18 @@ export class Battle {
             if (enemy.isOut) continue
 
             const target = this.perception.targetFor(enemy)
-            if (!target) {
-                record({
-                    kind: "idle",
-                    actor: enemy,
-                    at: { col: enemy.col, row: enemy.row },
-                    reason: "lost track of you",
-                })
-                combatLog.add(
-                    `${enemy.displayName} lost track of you`,
-                    0x94a3b8,
-                )
-                continue
-            }
-            yield* pause(400)
+            const wasAlert = enemy.alert
+            const plan = enemy.decide(target, (t) => this.isOccupied(t))
+            if (!plan) continue // unaware: stands guard
 
-            const plan = enemy.plan(target, target, (t) => this.isOccupied(t))
+            if (target && !wasAlert) {
+                this.say(`${enemy.displayName} spots you!`)
+                combatLog.add(`${enemy.displayName} spots you`, 0xfbbf24)
+            } else if (!target) {
+                combatLog.add(`${enemy.displayName} searches for you`, 0x94a3b8)
+            }
+
+            yield* pause(400)
             yield* enemy.execute(plan, {
                 afterHit: (hit, action) => this.applyPush(enemy, hit, action),
             })
@@ -234,28 +272,29 @@ export class Battle {
         return yield* this.checkEnd()
     }
 
+    /** Only dying ends the fight. Winning means passing the last door. */
     private *checkEnd(): Script<boolean> {
-        const won = this.enemies.every((e) => e.isDead)
-        const lost = this.player.isDead
-        if (!won && !lost) return false
-
+        if (!this.player.isDead) return false
         if (sim.dry) {
-            record({ kind: "end", won })
+            record({ kind: "end", won: false })
             return true
         }
+        yield* this.conclude(false)
+        return true
+    }
 
+    private *conclude(won: boolean): Script {
         this.phase = "over"
         this.selectedAction = null
         this.clearAllHighlights()
         combatLog.add(
-            won ? "Victory!" : "You were defeated",
+            won ? "You escaped!" : "You were defeated",
             won ? 0x4ade80 : 0xf87171,
         )
         this.onChange?.()
 
         yield wait(500)
         this.onGameOver?.(won)
-        return true
     }
 
     /** Refresh visibility and the HUD after something happened (live only) */
@@ -295,9 +334,9 @@ export class Battle {
     private async tryMove(tile: Tile) {
         const exit = this.board.doorAt(tile)
         if (exit) {
-            const doorReason = this.doorReason(exit)
-            if (doorReason) {
-                this.say(doorReason)
+            const locked = this.doorReason(exit)
+            if (locked) {
+                this.say(locked)
                 return
             }
         }
@@ -323,11 +362,45 @@ export class Battle {
         this.clearAllHighlights()
         const path = buildPath(node)
         await this.player.followPath(path)
-        const reachedExit =
-            path.length > 0 && this.board.doorAt(path[path.length - 1])
-        if (reachedExit) await this.changeMap(reachedExit)
+
+        const reached = this.board.doorAt(path[path.length - 1])
+        if (reached && (await this.useExit(reached))) return
+
         this.perception.syncView()
         await this.finishAction()
+    }
+
+    /** Walk through a door. Returns true when the level is over. */
+    private async useExit(exit: ExitDef): Promise<boolean> {
+        for (const a of this.abilities) a.onMapChange()
+
+        if (exit.to === "victory") {
+            combatLog.add("You step through the final door", 0x4ade80)
+            await runLive(this.conclude(true))
+            return true
+        }
+
+        const dest = exit.to
+        const map = MAPS[dest.map]
+        if (!map) {
+            this.say("That door leads nowhere")
+            return false
+        }
+        const arrival = dest.exit
+            ? map.exits.find((e) => e.id === dest.exit)
+            : undefined
+
+        await animate(this.board, { alpha: 0 }, { duration: 0.25 })
+        this.loadMap(dest.map, arrival)
+        this.selectedAction = null
+        this.inspected = null
+        this.perception.syncView()
+        this.refreshDoorStates()
+        await animate(this.board, { alpha: 1 }, { duration: 0.25 })
+
+        combatLog.add(`You enter ${map.name}`, 0x94a3b8)
+        this.say(map.name)
+        return false
     }
 
     private async useAction(action: Action, tile: Tile) {
@@ -389,14 +462,14 @@ export class Battle {
 
         p.spendAp(action.apCost)
         this.onChange?.()
-        const dealt = await target.takeDamage(
-            computeDamage(action as never, p, target),
-        )
+        const dealt = await target.takeDamage(computeDamage(action, p, target))
         logHit(p, target, action, dealt)
+        if (target.isDead) this.defeated++
         await runLive(this.applyPush(p, target, action))
 
         for (const a of this.abilities) a.afterAction(action)
-        const spent = p.consumeAttackStatuses()
+        // Ko is only spent by physical attacks
+        const spent = action.physical ? p.consumeAttackStatuses() : []
         if (spent.length > 0) this.say(`${spent.join(", ")} spent`)
         await this.finishAction()
     }
@@ -413,7 +486,7 @@ export class Battle {
         this.onChange?.()
     }
 
-    // ---------- Pushes ----------
+    // ---------- Pushes (no attack uses them yet, but abilities can) ----------
 
     /** Slide the target away from the attacker (used by every attacker) */
     public *applyPush(attacker: Tile, target: Entity, action: Action): Script {
@@ -502,11 +575,17 @@ export class Battle {
         this.onChange?.()
     }
 
+    private exitName(exit: ExitDef) {
+        return exit.to === "victory"
+            ? "Freedom"
+            : (MAPS[exit.to.map]?.name ?? "?")
+    }
+
     /**
      * What hovering a tile tells you:
      *  - a self action on yourself: its cost, and the zone it would start
      *  - an attack on an enemy: the damage and the HP left (or why it's impossible)
-     *  - nothing selected: the walking path and its AP cost
+     *  - nothing selected: the walking path and its AP cost (and where a door leads)
      */
     private drawHoverInfo(tile: Tile) {
         const p = this.player
@@ -555,7 +634,7 @@ export class Battle {
                 return
             }
 
-            const damage = computeDamage(action as never, p, target)
+            const damage = computeDamage(action, p, target)
             const after = Math.max(0, target.stats.hp - damage)
             this.board.drawAttackArrow(p, tile, 0xef4444)
             this.board.addTag(
@@ -592,9 +671,10 @@ export class Battle {
         const safe = this.abilities.every((a) => a.isTileSafe(tile))
         const color = safe ? 0x3b82f6 : 0xf97316
         this.board.drawPathArrow(p, buildPath(node), color)
+        const door = exit ? `  ·  → ${this.exitName(exit)}` : ""
         this.board.addTag(
             tile,
-            `${node.dist} AP  ·  ${p.stats.ap - node.dist} left${safe ? "" : "  ·  ends Laplace"}`,
+            `${node.dist} AP  ·  ${p.stats.ap - node.dist} left${safe ? "" : "  ·  ends Laplace"}${door}`,
             color,
             60,
         )
@@ -717,7 +797,7 @@ export class Battle {
         )
     }
 
-    /** Whether an enemy would notice the player standing at a specific tile. */
+    /** Whether an enemy would notice the player standing at a tile (door conditions use this) */
     public canPerceivePlayer(enemy: Entity, at?: Tile) {
         return this.perception.canPerceivePlayer(enemy, at)
     }
@@ -740,9 +820,7 @@ export class Battle {
     private doorReason(exit: ExitDef) {
         const at = this.board.doorTile(exit)
         return (
-            exit.requires
-                ?.map((condition) => condition(this, at))
-                .find(Boolean) ?? null
+            exit.requires?.map((rule) => rule(this, at)).find(Boolean) ?? null
         )
     }
 
@@ -751,31 +829,5 @@ export class Battle {
         for (const exit of this.board.doors)
             states.set(exit.id, this.doorReason(exit))
         this.board.setDoorStates(states)
-    }
-
-    private async changeMap(exit: ExitDef) {
-        const map: MapDef | undefined = MAPS[exit.to.map]
-        const entry = map?.exits.find((candidate) => candidate.id === exit.to.exit)
-        if (!map || !entry) {
-            this.say("That exit has no destination")
-            return
-        }
-
-        for (const ability of this.abilities) ability.onMapChange()
-        for (const enemy of this.enemies) enemy.destroy()
-
-        this.selectedAction = null
-        this.currentMapId = exit.to.map
-        this.board.load(map)
-        await this.player.slide([this.board.innerTile(entry)])
-        this.enemies = map.enemies.map(
-            (spawn) => new Enemy(this.board, spawn.col, spawn.row, spawn.type),
-        )
-        for (const enemy of this.enemies)
-            this.board.entityLayer.addChild(enemy)
-
-        combatLog.add(`You enter ${map.name}`, 0x94a3b8)
-        this.inspected = null
-        this.refreshHighlights()
     }
 }

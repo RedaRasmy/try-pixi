@@ -32,6 +32,10 @@ export interface Action {
     isOn?: () => boolean
     /** The effect (self actions) */
     run?: () => void
+    /** Physical attacks are boosted by Ren and Ko. Bullets and other objects are not. */
+    physical?: boolean
+    /** Entities with a magazine (soldiers): each use takes one bullet */
+    usesAmmo?: boolean
 }
 
 export type AttackAction = Action & { baseDamage: number }
@@ -46,6 +50,7 @@ export const PLAYER_ACTIONS: AttackAction[] = [
         minRange: 1,
         maxRange: 1,
         baseDamage: 15,
+        physical: true,
     },
     {
         id: "kick",
@@ -54,19 +59,18 @@ export const PLAYER_ACTIONS: AttackAction[] = [
         minRange: 1,
         maxRange: 2,
         baseDamage: 20,
+        physical: true,
     },
 ]
 
-/** Damage = base x attacker stat x attacker's multipliers x target's multipliers */
+/** Damage = base x attacker stat x (Ren/Ko, physical only) x target's multipliers */
 export function computeDamage(
-    action: AttackAction,
+    action: Action,
     attacker: Entity,
     target?: Entity,
 ) {
-    const raw =
-        (action.baseDamage / 10) *
-        attacker.stats.damage *
-        attacker.damageDealtMultiplier()
+    const boost = action.physical ? attacker.damageDealtMultiplier() : 1
+    const raw = ((action.baseDamage ?? 0) / 10) * attacker.stats.damage * boost
     return Math.max(1, Math.round(raw * (target?.damageTakenMultiplier() ?? 1)))
 }
 
@@ -88,5 +92,6 @@ export function describeAction(a: Action) {
     const parts = [`Range ${range}`, `base damage ${a.baseDamage ?? 0}`]
     if (a.push) parts.push(`pushes ${a.push}`)
     if (a.needsSight === false) parts.push("ignores walls")
+    parts.push(a.physical ? "physical (Ren/Ko apply)" : "not boosted by Ren/Ko")
     return parts.join("  ·  ")
 }

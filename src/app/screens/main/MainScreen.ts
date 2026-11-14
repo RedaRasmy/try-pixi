@@ -1,53 +1,45 @@
-import { FancyButton } from "@pixi/ui"
 import { animate } from "motion"
-import type { AnimationPlaybackControls } from "motion/react"
 import type { Ticker } from "pixi.js"
 import { Container } from "pixi.js"
-import { engine } from "../../getEngine"
-import { SettingsPopup } from "../../popups/SettingsPopup"
-import { Battle } from "./Battle"
-import { Board } from "./world/Board"
-import { Hud } from "./ui/Hud"
 
-/** The screen that holds the app */
+import type { LevelDef } from "./data/Levels"
+import { Game } from "./Game"
+import { MainMenu } from "./ui/MainMenu"
+
+/** The screen that holds the app: a menu, and the running level */
 export class MainScreen extends Container {
     /** Assets bundles required by this screen */
     public static assetBundles = ["main"]
 
-    public mainContainer: Container
-    private settingsButton: FancyButton
-    private board: Board
-    private battle: Battle
-    private hud: Hud
+    private menu: MainMenu
+    private game: Game | null = null
+    private viewW = 0
+    private viewH = 0
     private paused = false
 
     constructor() {
         super()
+        this.menu = new MainMenu((level) => this.startLevel(level))
+        this.addChild(this.menu)
+    }
 
-        this.mainContainer = new Container()
-        this.addChild(this.mainContainer)
-
-        this.board = new Board()
-        this.mainContainer.addChild(this.board)
-
-        this.battle = new Battle(this.board)
-        this.hud = new Hud(this.battle)
-        this.addChild(this.hud)
-
-        const buttonAnimations = {
-            hover: { props: { scale: { x: 1.1, y: 1.1 } }, duration: 100 },
-            pressed: { props: { scale: { x: 0.9, y: 0.9 } }, duration: 100 },
-        }
-
-        this.settingsButton = new FancyButton({
-            defaultView: "icon-settings.png",
-            anchor: 0.5,
-            animations: buttonAnimations,
-        })
-        this.settingsButton.onPress.connect(() =>
-            engine().navigation.presentPopup(SettingsPopup),
+    private startLevel(level: LevelDef) {
+        this.game?.destroy({ children: true })
+        // Leaving is deferred: the button that asked for it is still handling its click
+        const game = new Game(level, () =>
+            setTimeout(() => this.closeLevel(), 0),
         )
-        // this.addChild(this.settingsButton)
+        this.game = game
+        this.addChildAt(game, 0)
+        this.menu.visible = false
+        game.setPaused(this.paused)
+        game.resize(this.viewW, this.viewH)
+    }
+
+    private closeLevel() {
+        this.game?.destroy({ children: true })
+        this.game = null
+        this.menu.visible = true
     }
 
     /** Prepare the screen just before showing */
@@ -61,16 +53,14 @@ export class MainScreen extends Container {
 
     /** Pause gameplay - automatically fired when a popup is presented */
     public async pause() {
-        this.mainContainer.interactiveChildren = false
-        this.hud.interactiveChildren = false
         this.paused = true
+        this.game?.setPaused(true)
     }
 
     /** Resume gameplay */
     public async resume() {
-        this.mainContainer.interactiveChildren = true
-        this.hud.interactiveChildren = true
         this.paused = false
+        this.game?.setPaused(false)
     }
 
     /** Fully reset */
@@ -78,31 +68,16 @@ export class MainScreen extends Container {
 
     /** Resize the screen, fired whenever window size changes */
     public resize(width: number, height: number) {
-        this.mainContainer.x = width * 0.5
-        this.mainContainer.y = height * 0.45
-        this.mainContainer.scale.set(Math.min(1, width / 1400, height / 950))
-
-        this.settingsButton.x = width - 30
-        this.settingsButton.y = 30
-
-        this.hud.resize(width, height)
+        this.viewW = width
+        this.viewH = height
+        this.menu.resize(width, height)
+        this.game?.resize(width, height)
     }
 
     /** Show screen with animations */
     public async show(): Promise<void> {
-        const elementsToAnimate = [this.settingsButton, this.hud]
-
-        let finalPromise!: AnimationPlaybackControls
-        for (const element of elementsToAnimate) {
-            element.alpha = 0
-            finalPromise = animate(
-                element,
-                { alpha: 1 },
-                { duration: 0.3, delay: 0.75, ease: "backOut" },
-            )
-        }
-
-        await finalPromise
+        this.alpha = 0
+        await animate(this, { alpha: 1 }, { duration: 0.3 })
     }
 
     /** Hide screen with animations */

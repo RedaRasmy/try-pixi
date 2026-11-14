@@ -40,7 +40,7 @@ export class StatusBar extends Container {
 
         for (const s of entity.statusList()) {
             const parts = [s.name]
-            if (s.dealt && s.dealt !== 1) parts.push(`deals x${s.dealt}`)
+            if (s.dealt && s.dealt !== 1) parts.push(`physical x${s.dealt}`)
             if (s.taken && s.taken !== 1) parts.push(`takes x${s.taken}`)
             if (s.consumeOnAttack) parts.push("next attack")
             if (s.turnsLeft !== undefined) {
