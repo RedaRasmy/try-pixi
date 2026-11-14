@@ -48,7 +48,7 @@ export class MainScreen extends Container {
         this.settingsButton.onPress.connect(() =>
             engine().navigation.presentPopup(SettingsPopup),
         )
-        this.addChild(this.settingsButton)
+        // this.addChild(this.settingsButton)
     }
 
     /** Prepare the screen just before showing */

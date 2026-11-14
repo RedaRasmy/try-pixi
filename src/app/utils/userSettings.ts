@@ -3,7 +3,6 @@ import { engine } from "../getEngine";
 
 // Keys for saved items in storage
 const KEY_VOLUME_MASTER = "volume-master";
-const KEY_VOLUME_BGM = "volume-bgm";
 const KEY_VOLUME_SFX = "volume-sfx";
 
 /**
@@ -12,7 +11,6 @@ const KEY_VOLUME_SFX = "volume-sfx";
 class UserSettings {
   public init() {
     engine().audio.setMasterVolume(this.getMasterVolume());
-    engine().audio.bgm.setVolume(this.getBgmVolume());
     engine().audio.sfx.setVolume(this.getSfxVolume());
   }
 
@@ -27,16 +25,6 @@ class UserSettings {
     storage.setNumber(KEY_VOLUME_MASTER, value);
   }
 
-  /** Get background music volume */
-  public getBgmVolume() {
-    return storage.getNumber(KEY_VOLUME_BGM) ?? 1;
-  }
-
-  /** Set background music volume */
-  public setBgmVolume(value: number) {
-    engine().audio.bgm.setVolume(value);
-    storage.setNumber(KEY_VOLUME_BGM, value);
-  }
 
   /** Get sound effects volume */
   public getSfxVolume() {

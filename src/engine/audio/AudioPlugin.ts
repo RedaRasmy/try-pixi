@@ -1,8 +1,8 @@
-import { sound } from "@pixi/sound";
-import { ExtensionType } from "pixi.js";
-import type { Application, ExtensionMetadata } from "pixi.js";
+import { sound } from "@pixi/sound"
+import { ExtensionType } from "pixi.js"
+import type { Application, ExtensionMetadata } from "pixi.js"
 
-import { BGM, SFX } from "./audio";
+import { SFX } from "./audio"
 
 /**
  * Middleware for Application's audio functionality.
@@ -15,35 +15,34 @@ import { BGM, SFX } from "./audio";
  * * Application#audio.setMasterVolume
  */
 export class CreationAudioPlugin {
-  /** @ignore */
-  public static extension: ExtensionMetadata = ExtensionType.Application;
+    /** @ignore */
+    public static extension: ExtensionMetadata = ExtensionType.Application
 
-  /**
-   * Initialize the plugin with scope of application instance
-   */
-  public static init(): void {
-    const app = this as unknown as Application;
+    /**
+     * Initialize the plugin with scope of application instance
+     */
+    public static init(): void {
+        const app = this as unknown as Application
 
-    app.audio = {
-      bgm: new BGM(),
-      sfx: new SFX(),
-      getMasterVolume: () => sound.volumeAll,
-      setMasterVolume: (volume: number) => {
-        sound.volumeAll = volume;
-        if (!volume) {
-          sound.muteAll();
-        } else {
-          sound.unmuteAll();
+        app.audio = {
+            sfx: new SFX(),
+            getMasterVolume: () => sound.volumeAll,
+            setMasterVolume: (volume: number) => {
+                sound.volumeAll = volume
+                if (!volume) {
+                    sound.muteAll()
+                } else {
+                    sound.unmuteAll()
+                }
+            },
         }
-      },
-    };
-  }
+    }
 
-  /**
-   * Clean up the ticker, scoped to application
-   */
-  public static destroy(): void {
-    const app = this as unknown as Application;
-    app.audio = null as unknown as Application["audio"];
-  }
+    /**
+     * Clean up the ticker, scoped to application
+     */
+    public static destroy(): void {
+        const app = this as unknown as Application
+        app.audio = null as unknown as Application["audio"]
+    }
 }

@@ -9,7 +9,6 @@ declare global {
   namespace PixiMixins {
     interface Application extends DeepRequired<CreationResizePluginOptions> {
       audio: {
-        bgm: BGM;
         sfx: SFX;
         getMasterVolume: () => number;
         setMasterVolume: (volume: number) => void;
